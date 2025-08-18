@@ -12,6 +12,7 @@ A CLI tool that monitors GitHub notifications and sends desktop alerts for new o
 - **Auto Cleanup**: Automatically removes read notifications and manages cache size
 - **Status Monitoring**: Check service status and recent notifications
 - **URL Handling**: Automatically converts GitHub API URLs to clickable web URLs
+- **Waybar Integration**: JSON output with nerd font icons for status bar integration
 
 ## Installation
 
@@ -52,6 +53,9 @@ gh-notify clear
 
 # Check service status
 gh-notify status
+
+# Output JSON for waybar integration
+gh-notify sync --waybar-output
 ```
 
 ### Service Installation
@@ -87,6 +91,27 @@ systemctl --user stop gh-notify.timer
 # Start service
 systemctl --user start gh-notify.timer
 ```
+
+### Waybar Integration
+
+For status bar integration with waybar:
+
+```bash
+# Add to your waybar config.jsonc
+"custom/github": {
+    "exec": "gh-notify sync --waybar-output",
+    "interval": 60,
+    "return-type": "json",
+    "tooltip": true,
+    "format": "{}",
+    "on-click": "gh-notify list"
+}
+```
+
+The waybar output includes:
+- Notification count in parentheses (e.g., "(3)")
+- Rich tooltip with repository grouping and nerd font icons
+- Empty output when no notifications
 
 ## Configuration
 

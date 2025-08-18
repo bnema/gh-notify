@@ -141,12 +141,12 @@ func runSync(cmd *cobra.Command, args []string) error {
 		var waybar WaybarOutput
 		if totalNotifications > 0 {
 			waybar = WaybarOutput{
-				Text:    fmt.Sprintf("(%d)", totalNotifications),
+				Text:    fmt.Sprintf("%s (%d)", nerdfonts.GitHub, totalNotifications),
 				Tooltip: buildTooltip(c.GetNotifications()),
 			}
 		} else {
 			waybar = WaybarOutput{
-				Text:    "",
+				Text:    nerdfonts.GitHub,
 				Tooltip: "",
 			}
 		}

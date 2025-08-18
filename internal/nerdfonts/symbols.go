@@ -26,3 +26,8 @@ const (
 	Error   = "\uf00d" // 
 	Info    = "\uf129" // 
 )
+
+// Brand symbols
+const (
+	GitHub = "\ue709" // nf-dev-github
+)
