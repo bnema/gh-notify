@@ -104,7 +104,7 @@ For status bar integration with waybar:
     "return-type": "json",
     "tooltip": true,
     "format": "{}",
-    "on-click": "gh-notify list"
+    "on-click": "xdg-open https://github.com/notifications"
 }
 ```
 
