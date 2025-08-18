@@ -131,13 +131,13 @@ func (n *Notifier) getUrgency(reason string) string {
 	}
 }
 
-// sendNotifyNotification sends a notification using notify-send with clickable action
+// sendNotifyNotification sends a notification using notify-send with clickable default action
 func (n *Notifier) sendNotifyNotification(title, message, urgency string) error {
 	args := []string{
 		"--app-name=GitHub Notify",
 		"--urgency=" + urgency,
-		"--action=open=Open GitHub Notifications",
-		"--action=dismiss=Dismiss",
+		"--action", "default=Open GitHub Notifications",
+		"--wait",
 		title,
 		message,
 	}
@@ -149,20 +149,18 @@ func (n *Notifier) sendNotifyNotification(title, message, urgency string) error 
 	}
 
 	// Handle the action response (this runs in background)
-	go n.handleNotificationAction(string(output))
+	go n.handleNotificationAction(strings.TrimSpace(string(output)))
 
 	return nil
 }
 
 // handleNotificationAction processes the action response from notify-send
 func (n *Notifier) handleNotificationAction(response string) {
-	response = strings.TrimSpace(response)
-	if response == "open" {
+	if response == "default" {
 		// Open GitHub notifications page in default browser
 		cmd := exec.Command("xdg-open", "https://github.com/notifications")
 		cmd.Run() // Ignore errors for browser opening
 	}
-	// "dismiss" action doesn't need handling as it just closes the notification
 }
 
 func (n *Notifier) IsEnabled() bool {
