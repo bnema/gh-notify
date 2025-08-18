@@ -146,8 +146,8 @@ func runSync(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			waybar = WaybarOutput{
-				Text:    "",
-				Tooltip: "",
+				Text:    fmt.Sprintf("%s (0)", nerdfonts.GitHub),
+				Tooltip: "No notifications",
 			}
 		}
 
