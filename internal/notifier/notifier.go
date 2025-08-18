@@ -2,26 +2,19 @@ package notifier
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 
-	"github.com/0xAX/notificator"
 	"github.com/bnema/gh-notify/internal/cache"
 )
 
 type Notifier struct {
-	notificator *notificator.Notificator
-	enabled     bool
+	enabled bool
 }
 
 func New(enabled bool) *Notifier {
-	notify := notificator.New(notificator.Options{
-		DefaultIcon: "",
-		AppName:     "GitHub Notify",
-	})
-
 	return &Notifier{
-		notificator: notify,
-		enabled:     enabled,
+		enabled: enabled,
 	}
 }
 
@@ -34,7 +27,7 @@ func (n *Notifier) SendNotification(entry cache.CacheEntry) error {
 	message := n.formatMessage(entry)
 	urgency := n.getUrgency(entry.Reason)
 
-	return n.notificator.Push(title, message, "", urgency)
+	return n.sendNotifyNotification(title, message, urgency)
 }
 
 func (n *Notifier) SendBulkNotification(entries []cache.CacheEntry) error {
@@ -50,7 +43,7 @@ func (n *Notifier) SendBulkNotification(entries []cache.CacheEntry) error {
 	title := fmt.Sprintf("GitHub - %d new notifications", len(entries))
 	message := n.formatBulkMessage(entries)
 
-	return n.notificator.Push(title, message, "", notificator.UR_NORMAL)
+	return n.sendNotifyNotification(title, message, "normal")
 }
 
 func (n *Notifier) formatTitle(entry cache.CacheEntry) string {
@@ -130,12 +123,46 @@ func (n *Notifier) formatReason(reason string) string {
 func (n *Notifier) getUrgency(reason string) string {
 	switch reason {
 	case "security_alert":
-		return notificator.UR_CRITICAL
+		return "critical"
 	case "assign", "review_requested", "mention", "team_mention":
-		return notificator.UR_NORMAL
+		return "normal"
 	default:
-		return notificator.UR_NORMAL
+		return "normal"
 	}
+}
+
+// sendNotifyNotification sends a notification using notify-send with clickable action
+func (n *Notifier) sendNotifyNotification(title, message, urgency string) error {
+	args := []string{
+		"--app-name=GitHub Notify",
+		"--urgency=" + urgency,
+		"--action=open=Open GitHub Notifications",
+		"--action=dismiss=Dismiss",
+		title,
+		message,
+	}
+
+	cmd := exec.Command("notify-send", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("notify-send failed: %w, output: %s", err, string(output))
+	}
+
+	// Handle the action response (this runs in background)
+	go n.handleNotificationAction(string(output))
+
+	return nil
+}
+
+// handleNotificationAction processes the action response from notify-send
+func (n *Notifier) handleNotificationAction(response string) {
+	response = strings.TrimSpace(response)
+	if response == "open" {
+		// Open GitHub notifications page in default browser
+		cmd := exec.Command("xdg-open", "https://github.com/notifications")
+		cmd.Run() // Ignore errors for browser opening
+	}
+	// "dismiss" action doesn't need handling as it just closes the notification
 }
 
 func (n *Notifier) IsEnabled() bool {

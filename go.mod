@@ -3,7 +3,6 @@ module github.com/bnema/gh-notify
 go 1.24.6
 
 require (
-	github.com/0xAX/notificator v0.0.0-20220220101646-ee9b8921e557
 	github.com/cli/go-gh/v2 v2.12.2
 	github.com/spf13/cobra v1.9.1
 )
