@@ -2,6 +2,7 @@ package github
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/bnema/gh-notify/internal/cache"
@@ -62,7 +63,7 @@ func (c *Client) parseNotifications(response []map[string]interface{}) []cache.C
 			continue
 		}
 
-		var repository, title, reason string
+		var repository, title, reason, notifType, apiURL string
 		var updatedAt time.Time
 
 		if repo, ok := notification["repository"].(map[string]interface{}); ok {
@@ -75,6 +76,12 @@ func (c *Client) parseNotifications(response []map[string]interface{}) []cache.C
 			if subjectTitle, ok := subject["title"].(string); ok {
 				title = subjectTitle
 			}
+			if subjectType, ok := subject["type"].(string); ok {
+				notifType = subjectType
+			}
+			if subjectURL, ok := subject["url"].(string); ok {
+				apiURL = subjectURL
+			}
 		}
 
 		if reasonStr, ok := notification["reason"].(string); ok {
@@ -85,11 +92,17 @@ func (c *Client) parseNotifications(response []map[string]interface{}) []cache.C
 			updatedAt = parseTime(updatedAtStr)
 		}
 
+		// Convert API URL to web URL
+		webURL := convertAPIURLToWeb(apiURL)
+
 		entry := cache.CacheEntry{
 			ID:         id,
 			Repository: repository,
 			Title:      title,
 			Reason:     reason,
+			Type:       notifType,
+			URL:        apiURL,
+			WebURL:     webURL,
 			Timestamp:  now,
 			UpdatedAt:  updatedAt,
 		}
@@ -126,4 +139,54 @@ func (c *Client) TestAuth() error {
 	}
 
 	return nil
+}
+
+// convertAPIURLToWeb converts GitHub API URLs to web URLs
+// Example: https://api.github.com/repos/owner/repo/issues/123 -> https://github.com/owner/repo/issues/123
+func convertAPIURLToWeb(apiURL string) string {
+	if apiURL == "" {
+		return ""
+	}
+
+	// Regular expression to match different GitHub API URL patterns
+	patterns := []struct {
+		regex       *regexp.Regexp
+		replacement string
+	}{
+		// Issues: https://api.github.com/repos/owner/repo/issues/123
+		{
+			regex:       regexp.MustCompile(`^https://api\.github\.com/repos/([^/]+)/([^/]+)/issues/(\d+)$`),
+			replacement: "https://github.com/$1/$2/issues/$3",
+		},
+		// Pull requests: https://api.github.com/repos/owner/repo/pulls/123
+		{
+			regex:       regexp.MustCompile(`^https://api\.github\.com/repos/([^/]+)/([^/]+)/pulls/(\d+)$`),
+			replacement: "https://github.com/$1/$2/pull/$3",
+		},
+		// Releases: https://api.github.com/repos/owner/repo/releases/123
+		{
+			regex:       regexp.MustCompile(`^https://api\.github\.com/repos/([^/]+)/([^/]+)/releases/(\d+)$`),
+			replacement: "https://github.com/$1/$2/releases/tag/$3", // Note: this might need release tag name
+		},
+		// Comments: https://api.github.com/repos/owner/repo/issues/comments/123
+		{
+			regex:       regexp.MustCompile(`^https://api\.github\.com/repos/([^/]+)/([^/]+)/issues/comments/(\d+)$`),
+			replacement: "https://github.com/$1/$2/issues", // Will redirect to the issue
+		},
+	}
+
+	for _, pattern := range patterns {
+		if pattern.regex.MatchString(apiURL) {
+			return pattern.regex.ReplaceAllString(apiURL, pattern.replacement)
+		}
+	}
+
+	// Fallback: try to extract owner/repo and create a general repo URL
+	repoRegex := regexp.MustCompile(`^https://api\.github\.com/repos/([^/]+)/([^/]+)/`)
+	if matches := repoRegex.FindStringSubmatch(apiURL); len(matches) >= 3 {
+		return fmt.Sprintf("https://github.com/%s/%s", matches[1], matches[2])
+	}
+
+	// If we can't convert, return the original URL
+	return apiURL
 }

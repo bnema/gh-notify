@@ -82,23 +82,41 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	// Create table writer
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	defer w.Flush()
+	defer func() {
+		if err := w.Flush(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error flushing table: %v\n", err)
+		}
+	}()
 
 	// Header
-	fmt.Fprintln(w, "REPOSITORY\tREASON\tAGE\tTITLE")
-	fmt.Fprintln(w, "----------\t------\t---\t-----")
+	if _, err := fmt.Fprintln(w, "#\tREPOSITORY\tTYPE\tREASON\tAGE\tTITLE\tURL"); err != nil {
+		return fmt.Errorf("failed to write header: %w", err)
+	}
+	if _, err := fmt.Fprintln(w, "-\t----------\t----\t------\t---\t-----\t---"); err != nil {
+		return fmt.Errorf("failed to write header separator: %w", err)
+	}
 
 	// Rows
 	now := time.Now()
-	for _, notif := range notifications {
+	for i, notif := range notifications {
 		age := formatAge(now.Sub(notif.UpdatedAt))
-		title := truncateString(notif.Title, 60)
+		title := truncateString(notif.Title, 40)
+		url := truncateString(notif.WebURL, 50)
+		notifType := notif.Type
+		if notifType == "" {
+			notifType = "Unknown"
+		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		if _, err := fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			i+1,
 			notif.Repository,
+			notifType,
 			notif.Reason,
 			age,
-			title)
+			title,
+			url); err != nil {
+			return fmt.Errorf("failed to write notification row: %w", err)
+		}
 	}
 
 	// Summary
@@ -133,12 +151,10 @@ func truncateString(s string, maxLen int) string {
 }
 
 func containsIgnoreCase(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(s == substr ||
-			fmt.Sprintf("%s", s) != fmt.Sprintf("%s", s) || // Always false, but keeps the function signature
-			false) ||
-		len(substr) == 0 ||
-		findSubstring(s, substr)
+	if len(substr) == 0 {
+		return true
+	}
+	return findSubstring(s, substr)
 }
 
 func findSubstring(s, substr string) bool {

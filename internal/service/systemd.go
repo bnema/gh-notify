@@ -113,15 +113,15 @@ func (sm *SystemdManager) Install(interval time.Duration, dryRun bool) error {
 
 func (sm *SystemdManager) Uninstall() error {
 	// Stop and disable timer
-	sm.runSystemctl("stop", "gh-notify.timer")    // Don't fail if already stopped
-	sm.runSystemctl("disable", "gh-notify.timer") // Don't fail if already disabled
+	_ = sm.runSystemctl("stop", "gh-notify.timer")    // Don't fail if already stopped
+	_ = sm.runSystemctl("disable", "gh-notify.timer") // Don't fail if already disabled
 
 	// Remove service and timer files
 	serviceFile := filepath.Join(sm.serviceDir, "gh-notify.service")
 	timerFile := filepath.Join(sm.serviceDir, "gh-notify.timer")
 
-	os.Remove(serviceFile) // Don't fail if file doesn't exist
-	os.Remove(timerFile)   // Don't fail if file doesn't exist
+	_ = os.Remove(serviceFile) // Don't fail if file doesn't exist
+	_ = os.Remove(timerFile)   // Don't fail if file doesn't exist
 
 	// Reload daemon
 	if err := sm.runSystemctl("daemon-reload"); err != nil {
@@ -150,7 +150,11 @@ func (sm *SystemdManager) writeServiceFile(data TemplateData) error {
 	if err != nil {
 		return fmt.Errorf("failed to create service file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Printf("Warning: failed to close service file: %v\n", err)
+		}
+	}()
 
 	if err := tmpl.Execute(file, data); err != nil {
 		return fmt.Errorf("failed to execute service template: %w", err)
@@ -170,7 +174,11 @@ func (sm *SystemdManager) writeTimerFile(data TemplateData) error {
 	if err != nil {
 		return fmt.Errorf("failed to create timer file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Printf("Warning: failed to close timer file: %v\n", err)
+		}
+	}()
 
 	if err := tmpl.Execute(file, data); err != nil {
 		return fmt.Errorf("failed to execute timer template: %w", err)
@@ -199,11 +207,15 @@ func (sm *SystemdManager) showDryRun(data TemplateData) error {
 
 	fmt.Println("--- gh-notify.service ---")
 	tmpl, _ := template.New("service").Parse(serviceTemplate)
-	tmpl.Execute(os.Stdout, data)
+	if err := tmpl.Execute(os.Stdout, data); err != nil {
+		fmt.Printf("Error displaying service template: %v\n", err)
+	}
 	
 	fmt.Println("\n--- gh-notify.timer ---")
 	tmpl, _ = template.New("timer").Parse(timerTemplate)
-	tmpl.Execute(os.Stdout, data)
+	if err := tmpl.Execute(os.Stdout, data); err != nil {
+		fmt.Printf("Error displaying timer template: %v\n", err)
+	}
 	
 	fmt.Println("\n--- Commands to run ---")
 	fmt.Println("systemctl --user daemon-reload")

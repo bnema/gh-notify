@@ -59,7 +59,14 @@ func (n *Notifier) formatTitle(entry cache.CacheEntry) string {
 
 func (n *Notifier) formatMessage(entry cache.CacheEntry) string {
 	reasonText := n.formatReason(entry.Reason)
-	return fmt.Sprintf("%s: %s", reasonText, entry.Title)
+	message := fmt.Sprintf("%s: %s", reasonText, entry.Title)
+	
+	// Add type info if available
+	if entry.Type != "" {
+		message = fmt.Sprintf("%s [%s]: %s", reasonText, entry.Type, entry.Title)
+	}
+	
+	return message
 }
 
 func (n *Notifier) formatBulkMessage(entries []cache.CacheEntry) string {

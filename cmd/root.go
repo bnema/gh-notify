@@ -44,6 +44,7 @@ func init() {
 	// Add subcommands
 	rootCmd.AddCommand(syncCmd)
 	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(openCmd)
 	rootCmd.AddCommand(clearCmd)
 	rootCmd.AddCommand(installServiceCmd)
 	rootCmd.AddCommand(statusCmd)
@@ -60,10 +61,3 @@ func initConfig() {
 	}
 }
 
-func getVerbose() bool {
-	return verbose
-}
-
-func getCacheDir() string {
-	return cacheDir
-}

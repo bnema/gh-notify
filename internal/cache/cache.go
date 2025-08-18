@@ -14,6 +14,9 @@ type CacheEntry struct {
 	Repository string    `json:"repository"`
 	Title      string    `json:"title"`
 	Reason     string    `json:"reason"`
+	Type       string    `json:"type"`
+	URL        string    `json:"url"`
+	WebURL     string    `json:"web_url"`
 	Timestamp  time.Time `json:"timestamp"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
