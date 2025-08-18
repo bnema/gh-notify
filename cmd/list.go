@@ -19,12 +19,12 @@ var (
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List cached notifications",
-	Long: `Display notifications from the local cache in a formatted table.
+	Short: "List cached unread notifications",
+	Long: `Display unread notifications from the local cache in a formatted table.
 
 This command shows all cached notifications with their repository,
-title, reason, and timestamps. You can filter by repository or
-limit the number of results shown.`,
+title, reason, and timestamps. All displayed notifications are unread
+and require your attention.`,
 	RunE: runList,
 }
 

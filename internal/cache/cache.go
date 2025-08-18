@@ -103,29 +103,32 @@ func (c *Cache) Save(cacheDir string) error {
 func (c *Cache) AddNotifications(notifications []CacheEntry) []CacheEntry {
 	c.LastSync = time.Now()
 	
-	// Create a map of existing notifications for quick lookup
+	// Create map of existing notification IDs  
 	existing := make(map[string]bool)
 	for _, entry := range c.Notifications {
 		existing[entry.ID] = true
 	}
-
-	var newNotifications []CacheEntry
 	
-	// Add new notifications
+	// Find genuinely new notifications
+	var newNotifications []CacheEntry
 	for _, notification := range notifications {
 		if !existing[notification.ID] {
-			c.Notifications = append(c.Notifications, notification)
 			newNotifications = append(newNotifications, notification)
 		}
 	}
-
+	
+	// Replace entire cache with current unread notifications from GitHub
+	// This automatically removes notifications that were read (not in incoming list)
+	c.Notifications = notifications
+	
 	return newNotifications
 }
 
 func (c *Cache) cleanup() {
 	now := time.Now()
 	
-	// Remove entries older than MaxAge
+	// All cached entries are unread by definition
+	// Only need age and size limits as safety net
 	var validEntries []CacheEntry
 	for _, entry := range c.Notifications {
 		if now.Sub(entry.Timestamp) <= MaxAge {
@@ -133,11 +136,12 @@ func (c *Cache) cleanup() {
 		}
 	}
 	
-	// Sort by UpdatedAt (newest first) and keep only MaxEntries
+	// Sort by UpdatedAt (newest first)
 	sort.Slice(validEntries, func(i, j int) bool {
 		return validEntries[i].UpdatedAt.After(validEntries[j].UpdatedAt)
 	})
 	
+	// Apply max entries limit
 	if len(validEntries) > c.MaxEntries {
 		validEntries = validEntries[:c.MaxEntries]
 	}

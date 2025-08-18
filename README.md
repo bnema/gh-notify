@@ -4,12 +4,14 @@ A CLI tool that monitors GitHub notifications and sends desktop alerts for new o
 
 ## Features
 
-- 🔔 **Desktop Notifications**: Get real-time alerts for new GitHub notifications
-- 🔄 **Smart Caching**: Avoids duplicate notifications with local cache management
-- 🔐 **gh CLI Integration**: Reuses your existing `gh` authentication
-- ⚡ **Systemd Service**: Easy setup for automatic background monitoring
-- 🧹 **Auto Cleanup**: Manages cache size and removes old entries automatically
-- 📊 **Status Monitoring**: Check service status and recent notifications
+- **Desktop Notifications**: Get real-time alerts for new GitHub notifications with clickable actions
+- **Browser Integration**: Open notifications directly in your browser with numbered selection
+- **Smart Caching**: Only stores unread notifications with automatic cleanup
+- **gh CLI Integration**: Reuses your existing `gh` authentication
+- **Systemd Service**: Easy setup for automatic background monitoring
+- **Auto Cleanup**: Automatically removes read notifications and manages cache size
+- **Status Monitoring**: Check service status and recent notifications
+- **URL Handling**: Automatically converts GitHub API URLs to clickable web URLs
 
 ## Installation
 
@@ -17,7 +19,7 @@ A CLI tool that monitors GitHub notifications and sends desktop alerts for new o
 
 - Go 1.24 or later
 - `gh` CLI tool installed and authenticated
-- Linux desktop environment with notify-send (for desktop notifications)
+- Linux desktop environment with `notify-send` (for clickable desktop notifications)
 
 ### Build from Source
 
@@ -39,11 +41,11 @@ gh-notify sync
 # Sync with verbose output
 gh-notify sync --verbose
 
-# Include all notifications (read and unread)
-gh-notify sync --all
-
-# List cached notifications
+# List cached unread notifications (with numbers, types, and URLs)
 gh-notify list
+
+# Open a specific notification in browser (by number from list)
+gh-notify open 1
 
 # Clear notification cache
 gh-notify clear
@@ -94,9 +96,10 @@ Notifications are cached at `~/.cache/gh-notify/notifications.json`
 
 ### Cache Settings
 
-- **Maximum entries**: 500 notifications
-- **Retention period**: 30 days
-- **Automatic cleanup**: On each sync
+- **Content**: Only unread notifications (automatic cleanup)
+- **Maximum entries**: 500 unread notifications
+- **Retention period**: 30 days (safety fallback)
+- **Automatic cleanup**: On each sync, removes notifications that are no longer unread
 
 ### Custom Cache Directory
 
@@ -104,17 +107,25 @@ Notifications are cached at `~/.cache/gh-notify/notifications.json`
 gh-notify sync --cache-dir /path/to/custom/cache
 ```
 
+### How It Works
+
+The cache automatically stays small and relevant:
+1. Each sync fetches only unread notifications from GitHub
+2. Previously cached notifications that are no longer unread (handled on GitHub) are automatically removed
+3. Only notifications requiring your attention remain in the cache
+4. Fast loading and minimal storage usage
+
 ## Notification Types
 
 The tool handles various GitHub notification reasons:
 
-- 🎯 **assign**: You were assigned to an issue/PR
-- 💬 **mention**: You were mentioned in a comment
-- 👥 **team_mention**: Your team was mentioned
-- 🔍 **review_requested**: Review requested on a PR
-- 🚨 **security_alert**: Security vulnerability detected
-- 📝 **comment**: New comment on subscribed issue/PR
-- 🔄 **state_change**: Issue/PR state changed
+- **assign**: You were assigned to an issue/PR
+- **mention**: You were mentioned in a comment
+- **team_mention**: Your team was mentioned
+- **review_requested**: Review requested on a PR
+- **security_alert**: Security vulnerability detected
+- **comment**: New comment on subscribed issue/PR
+- **state_change**: Issue/PR state changed
 
 ## Examples
 
@@ -127,7 +138,11 @@ gh-notify install-service         # Install automatic service
 
 # Check everything is working
 gh-notify status                  # Verify service status
-gh-notify list                    # View cached notifications
+gh-notify list                    # View cached unread notifications with URLs
+
+# Open notifications in browser
+gh-notify open 1                  # Opens first notification from list
+gh-notify open 3                  # Opens third notification from list
 ```
 
 ### Troubleshooting
@@ -175,4 +190,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [GitHub CLI](https://cli.github.com/) for authentication
 - [Cobra](https://github.com/spf13/cobra) for CLI framework
-- [notificator](https://github.com/0xAX/notificator) for desktop notifications
+- Linux `notify-send` for desktop notifications

@@ -35,16 +35,11 @@ func NewClient() (*Client, error) {
 	}, nil
 }
 
-func (c *Client) FetchNotifications(all bool) ([]cache.CacheEntry, error) {
+func (c *Client) FetchNotifications() ([]cache.CacheEntry, error) {
 	var response []map[string]interface{}
-	var err error
-
-	if all {
-		err = c.restClient.Get("notifications?all=true", &response)
-	} else {
-		err = c.restClient.Get("notifications", &response)
-	}
-
+	
+	// Always fetch only unread notifications (GitHub API default)
+	err := c.restClient.Get("notifications", &response)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch notifications: %w", err)
 	}

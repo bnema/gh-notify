@@ -12,7 +12,6 @@ import (
 )
 
 var (
-	all      bool
 	noNotify bool
 	since    time.Duration
 )
@@ -20,23 +19,23 @@ var (
 var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Sync GitHub notifications and alert on new ones",
-	Long: `Fetch GitHub notifications, compare with the local cache, and send
+	Long: `Fetch unread GitHub notifications, compare with the local cache, and send
 desktop notifications for any new notifications found.
 
 The command will:
 1. Load the existing notification cache
-2. Fetch notifications from GitHub using your gh authentication
+2. Fetch unread notifications from GitHub using your gh authentication
 3. Compare with cached notifications to find new ones
 4. Send desktop notifications for new notifications
-5. Update the cache with all current notifications
-6. Clean up old cache entries
+5. Update the cache with current unread notifications
+6. Remove any notifications that are no longer unread (handled on GitHub)
+7. Clean up old cache entries
 
 This command is designed to be run periodically (e.g., via systemd timer).`,
 	RunE: runSync,
 }
 
 func init() {
-	syncCmd.Flags().BoolVar(&all, "all", false, "show all notifications, not just unread")
 	syncCmd.Flags().BoolVar(&noNotify, "no-notify", false, "skip desktop notifications, just update cache")
 	syncCmd.Flags().DurationVar(&since, "since", 0, "only check notifications updated since duration ago (e.g., 1h, 30m)")
 }
@@ -72,7 +71,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	// Fetch notifications
-	notifications, err := ghClient.FetchNotifications(all)
+	notifications, err := ghClient.FetchNotifications()
 	if err != nil {
 		return fmt.Errorf("failed to fetch notifications: %w", err)
 	}

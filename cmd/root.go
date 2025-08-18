@@ -19,8 +19,9 @@ var rootCmd = &cobra.Command{
 	Short: "GitHub notification monitor with desktop alerts",
 	Long: `A CLI tool that monitors GitHub notifications and sends desktop alerts for new ones.
 
-gh-notify leverages your existing gh CLI authentication to fetch GitHub notifications,
-maintains a cache of seen notifications, and sends desktop notifications for new items.
+gh-notify leverages your existing gh CLI authentication to fetch unread GitHub notifications,
+maintains a smart cache of notifications requiring attention, and sends desktop notifications
+for new items.
 
 Perfect for running as a systemd service to get real-time notifications.`,
 	Version: "1.0.0",
