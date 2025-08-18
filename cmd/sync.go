@@ -1,20 +1,30 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/bnema/gh-notify/internal/cache"
 	"github.com/bnema/gh-notify/internal/github"
+	"github.com/bnema/gh-notify/internal/nerdfonts"
 	"github.com/bnema/gh-notify/internal/notifier"
 	"github.com/spf13/cobra"
 )
 
 var (
-	noNotify bool
-	since    time.Duration
+	noNotify     bool
+	since        time.Duration
+	waybarOutput bool
 )
+
+type WaybarOutput struct {
+	Text    string `json:"text"`
+	Tooltip string `json:"tooltip"`
+}
 
 var syncCmd = &cobra.Command{
 	Use:   "sync",
@@ -38,6 +48,7 @@ This command is designed to be run periodically (e.g., via systemd timer).`,
 func init() {
 	syncCmd.Flags().BoolVar(&noNotify, "no-notify", false, "skip desktop notifications, just update cache")
 	syncCmd.Flags().DurationVar(&since, "since", 0, "only check notifications updated since duration ago (e.g., 1h, 30m)")
+	syncCmd.Flags().BoolVar(&waybarOutput, "waybar-output", false, "output JSON for waybar integration")
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
@@ -123,6 +134,32 @@ func runSync(cmd *cobra.Command, args []string) error {
 		fmt.Println("Cache saved successfully")
 	}
 
+	// Handle waybar output
+	if waybarOutput {
+		totalNotifications := len(c.GetNotifications())
+
+		var waybar WaybarOutput
+		if totalNotifications > 0 {
+			waybar = WaybarOutput{
+				Text:    fmt.Sprintf("(%d)", totalNotifications),
+				Tooltip: buildTooltip(c.GetNotifications()),
+			}
+		} else {
+			waybar = WaybarOutput{
+				Text:    "",
+				Tooltip: "",
+			}
+		}
+
+		jsonOutput, err := json.Marshal(waybar)
+		if err != nil {
+			return fmt.Errorf("failed to marshal waybar output: %w", err)
+		}
+
+		fmt.Println(string(jsonOutput))
+		return nil // Exit early to only output JSON
+	}
+
 	// Output summary
 	if len(newNotifications) > 0 {
 		fmt.Printf("✓ %d new notifications found\n", len(newNotifications))
@@ -134,4 +171,64 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func buildTooltip(notifications []cache.CacheEntry) string {
+	if len(notifications) == 0 {
+		return "No pending notifications"
+	}
+
+	var tooltip strings.Builder
+	tooltip.WriteString("GitHub Notifications:\n")
+
+	// Sort notifications by repository for better organization
+	sort.Slice(notifications, func(i, j int) bool {
+		if notifications[i].Repository != notifications[j].Repository {
+			return notifications[i].Repository < notifications[j].Repository
+		}
+		return notifications[i].UpdatedAt.After(notifications[j].UpdatedAt)
+	})
+
+	currentRepo := ""
+	for _, notif := range notifications {
+		if notif.Repository != currentRepo {
+			if currentRepo != "" {
+				tooltip.WriteString("\n")
+			}
+			tooltip.WriteString(fmt.Sprintf("%s %s:\n", nerdfonts.Repository, notif.Repository))
+			currentRepo = notif.Repository
+		}
+
+		// Format notification with Nerd Font icon
+		icon := getNotificationIcon(notif.Reason, notif.Type)
+		tooltip.WriteString(fmt.Sprintf("  %s %s (%s)\n", icon, notif.Title, notif.Reason))
+	}
+
+	return tooltip.String()
+}
+
+func getNotificationIcon(reason, notifType string) string {
+	switch reason {
+	case "review_requested":
+		return nerdfonts.ReviewRequested
+	case "assign":
+		return nerdfonts.Assign
+	case "mention":
+		return nerdfonts.Mention
+	case "author":
+		return nerdfonts.Author
+	case "state_change":
+		return nerdfonts.StateChange
+	default:
+		switch notifType {
+		case "PullRequest":
+			return nerdfonts.PullRequest
+		case "Issue":
+			return nerdfonts.Issue
+		case "Release":
+			return nerdfonts.Release
+		default:
+			return nerdfonts.DefaultNotif
+		}
+	}
 }
