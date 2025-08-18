@@ -146,7 +146,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			waybar = WaybarOutput{
-				Text:    nerdfonts.GitHub,
+				Text:    "",
 				Tooltip: "",
 			}
 		}
