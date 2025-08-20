@@ -21,10 +21,20 @@ type CacheEntry struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+// StarEvent represents a star event for caching
+type StarEvent struct {
+	ID         string    `json:"id"`
+	Repository string    `json:"repository"` // Full name: "owner/repo"
+	StarredBy  string    `json:"starred_by"`
+	StarredAt  time.Time `json:"starred_at"`
+	Notified   bool      `json:"notified"`
+}
+
 type Cache struct {
 	Version       string       `json:"version"`
 	LastSync      time.Time    `json:"last_sync"`
 	Notifications []CacheEntry `json:"notifications"`
+	LastEventSync time.Time    `json:"last_event_sync"` // Track last sync for rate limiting
 	MaxEntries    int          `json:"max_entries"`
 }
 
@@ -39,6 +49,7 @@ func New(cacheDir string) *Cache {
 		Version:       CacheVersion,
 		LastSync:      time.Time{},
 		Notifications: []CacheEntry{},
+		LastEventSync: time.Time{},
 		MaxEntries:    DefaultMaxEntries,
 	}
 }
@@ -127,6 +138,7 @@ func (c *Cache) AddNotifications(notifications []CacheEntry) []CacheEntry {
 func (c *Cache) cleanup() {
 	now := time.Now()
 	
+	// Cleanup notifications
 	// All cached entries are unread by definition
 	// Only need age and size limits as safety net
 	var validEntries []CacheEntry
@@ -159,6 +171,7 @@ func (c *Cache) GetNotifications() []CacheEntry {
 func (c *Cache) Clear() {
 	c.Notifications = []CacheEntry{}
 	c.LastSync = time.Time{}
+	c.LastEventSync = time.Time{}
 }
 
 func GetDefaultCacheDir() (string, error) {

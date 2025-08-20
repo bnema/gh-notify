@@ -32,7 +32,7 @@ Description=Run GitHub notification sync every {{.Interval}}
 Requires=gh-notify.service
 
 [Timer]
-OnBootSec=30s
+OnBootSec=60s
 OnUnitActiveSec={{.Interval}}
 AccuracySec=1s
 Persistent=true

@@ -3,6 +3,7 @@ package github
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"time"
 
 	"github.com/bnema/gh-notify/internal/cache"
@@ -10,7 +11,8 @@ import (
 )
 
 type Client struct {
-	restClient *api.RESTClient
+	restClient    *api.RESTClient
+	graphqlClient *api.GraphQLClient
 }
 
 type Notification struct {
@@ -30,8 +32,14 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to create GitHub REST client: %w", err)
 	}
 
+	graphqlClient, err := api.DefaultGraphQLClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GitHub GraphQL client: %w", err)
+	}
+
 	return &Client{
-		restClient: restClient,
+		restClient:    restClient,
+		graphqlClient: graphqlClient,
 	}, nil
 }
 
@@ -135,6 +143,101 @@ func (c *Client) TestAuth() error {
 
 	return nil
 }
+
+// GetAuthenticatedUser returns the username of the authenticated user
+func (c *Client) GetAuthenticatedUser() (string, error) {
+	var response map[string]interface{}
+	err := c.restClient.Get("user", &response)
+	if err != nil {
+		return "", fmt.Errorf("failed to get authenticated user: %w", err)
+	}
+
+	login, ok := response["login"].(string)
+	if !ok {
+		return "", fmt.Errorf("invalid response from GitHub API: missing login")
+	}
+
+	return login, nil
+}
+
+// FetchReceivedEvents fetches events received by the user (events on repositories they own)
+func (c *Client) FetchReceivedEvents(username string) ([]EventEntry, error) {
+	// This method is deprecated - use FetchRecentStars instead
+	return []EventEntry{}, nil
+}
+
+// FetchRecentStars fetches recent star events using GraphQL
+func (c *Client) FetchRecentStars(since time.Time) ([]StarEvent, error) {
+	// Use GraphQL to get all repositories with recent stargazers
+	query := `
+	{
+		viewer {
+			repositories(first: 100, ownerAffiliations: OWNER) {
+				nodes {
+					nameWithOwner
+					stargazers(last: 20, orderBy: {field: STARRED_AT, direction: DESC}) {
+						edges {
+							starredAt
+							node {
+								login
+							}
+						}
+					}
+				}
+				pageInfo {
+					hasNextPage
+					endCursor
+				}
+			}
+		}
+	}`
+
+	type GraphQLResponse struct {
+		Viewer struct {
+			Repositories struct {
+				Nodes []struct {
+					NameWithOwner string `json:"nameWithOwner"`
+					Stargazers    struct {
+						Edges []struct {
+							StarredAt time.Time `json:"starredAt"`
+							Node      struct {
+								Login string `json:"login"`
+							} `json:"node"`
+						} `json:"edges"`
+					} `json:"stargazers"`
+				} `json:"nodes"`
+			} `json:"repositories"`
+		} `json:"viewer"`
+	}
+
+	var response GraphQLResponse
+	err := c.graphqlClient.Do(query, nil, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch repositories: %w", err)
+	}
+
+	var starEvents []StarEvent
+	for _, repo := range response.Viewer.Repositories.Nodes {
+		for _, edge := range repo.Stargazers.Edges {
+			// Only include stars that happened after the 'since' time
+			if edge.StarredAt.After(since) {
+				starEvents = append(starEvents, StarEvent{
+					StarredBy:   edge.Node.Login,
+					Repository:  repo.NameWithOwner,
+					StarredAt:   edge.StarredAt,
+				})
+			}
+		}
+	}
+
+	// Sort by starred time (newest first)
+	sort.Slice(starEvents, func(i, j int) bool {
+		return starEvents[i].StarredAt.After(starEvents[j].StarredAt)
+	})
+
+	return starEvents, nil
+}
+
 
 // convertAPIURLToWeb converts GitHub API URLs to web URLs
 // Example: https://api.github.com/repos/owner/repo/issues/123 -> https://github.com/owner/repo/issues/123

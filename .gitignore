@@ -38,3 +38,4 @@ Thumbs.db
 
 # Local cache for testing
 .cache/
+.serena/

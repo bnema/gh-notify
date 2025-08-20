@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/bnema/gh-notify/internal/cache"
+	"github.com/bnema/gh-notify/internal/github"
+	"github.com/bnema/gh-notify/internal/nerdfonts"
 )
 
 type Notifier struct {
@@ -46,17 +48,95 @@ func (n *Notifier) SendBulkNotification(entries []cache.CacheEntry) error {
 	return n.sendNotifyNotification(title, message, "normal")
 }
 
+// SendStarNotifications sends notifications for new star events
+func (n *Notifier) SendStarNotifications(starEvents []github.StarEvent) error {
+	if !n.enabled || len(starEvents) == 0 {
+		return nil
+	}
+
+	if len(starEvents) == 1 {
+		// Convert github.StarEvent to cache.StarEvent for compatibility with existing method
+		cacheEvent := cache.StarEvent{
+			ID:         starEvents[0].ID,
+			Repository: starEvents[0].Repository,
+			StarredBy:  starEvents[0].StarredBy,
+			StarredAt:  starEvents[0].StarredAt,
+			Notified:   starEvents[0].Notified,
+		}
+		return n.sendStarNotification(cacheEvent)
+	}
+
+	// For multiple star events, send a summary
+	title := fmt.Sprintf("%s %d new stars!", nerdfonts.StarredRepo, len(starEvents))
+	
+	// Convert to cache.StarEvent for formatStarBulkMessage compatibility
+	var cacheEvents []cache.StarEvent
+	for _, event := range starEvents {
+		cacheEvents = append(cacheEvents, cache.StarEvent{
+			ID:         event.ID,
+			Repository: event.Repository,
+			StarredBy:  event.StarredBy,
+			StarredAt:  event.StarredAt,
+			Notified:   event.Notified,
+		})
+	}
+	message := n.formatStarBulkMessage(cacheEvents)
+
+	return n.sendNotifyNotification(title, message, "normal")
+}
+
+// sendStarNotification sends a single star event notification
+func (n *Notifier) sendStarNotification(star cache.StarEvent) error {
+	title := fmt.Sprintf("%s New Star!", nerdfonts.StarredRepo)
+	message := fmt.Sprintf("%s starred your repository: %s", star.StarredBy, star.Repository)
+
+	return n.sendNotifyNotification(title, message, "normal")
+}
+
+// formatStarBulkMessage formats multiple star events into a summary message
+func (n *Notifier) formatStarBulkMessage(starEvents []cache.StarEvent) string {
+	var lines []string
+	
+	// Group by repository
+	repoStars := make(map[string][]string)
+	for _, star := range starEvents {
+		repoStars[star.Repository] = append(repoStars[star.Repository], star.StarredBy)
+	}
+
+	// Show up to 5 repositories
+	count := 0
+	for repo, users := range repoStars {
+		if count >= 5 {
+			remaining := len(repoStars) - count
+			lines = append(lines, fmt.Sprintf("... and %d more repositories", remaining))
+			break
+		}
+		
+		if len(users) == 1 {
+			lines = append(lines, fmt.Sprintf("• %s starred %s", users[0], repo))
+		} else {
+			userList := strings.Join(users, ", ")
+			lines = append(lines, fmt.Sprintf("• %s starred %s", userList, repo))
+		}
+		count++
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 func (n *Notifier) formatTitle(entry cache.CacheEntry) string {
 	return fmt.Sprintf("GitHub - %s", entry.Repository)
 }
 
 func (n *Notifier) formatMessage(entry cache.CacheEntry) string {
 	reasonText := n.formatReason(entry.Reason)
-	message := fmt.Sprintf("%s: %s", reasonText, entry.Title)
 	
-	// Add type info if available
+	// Include repository name in the message body as requested
+	var message string
 	if entry.Type != "" {
-		message = fmt.Sprintf("%s [%s]: %s", reasonText, entry.Type, entry.Title)
+		message = fmt.Sprintf("%s [%s] in %s: %s", reasonText, entry.Type, entry.Repository, entry.Title)
+	} else {
+		message = fmt.Sprintf("%s in %s: %s", reasonText, entry.Repository, entry.Title)
 	}
 	
 	return message
@@ -159,7 +239,10 @@ func (n *Notifier) handleNotificationAction(response string) {
 	if response == "default" {
 		// Open GitHub notifications page in default browser
 		cmd := exec.Command("xdg-open", "https://github.com/notifications")
-		cmd.Run() // Ignore errors for browser opening
+		if err := cmd.Run(); err != nil {
+			// Log error but don't fail - browser opening is not critical
+			fmt.Printf("Warning: failed to open browser: %v\n", err)
+		}
 	}
 }
 
