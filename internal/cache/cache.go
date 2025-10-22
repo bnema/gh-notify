@@ -30,6 +30,11 @@ type StarEvent struct {
 	Notified   bool      `json:"notified"`
 }
 
+// Cache stores notifications and star events with their metadata.
+//
+// IMPORTANT: All time.Time fields should use UTC to match GitHub API responses
+// and ensure consistent time comparisons across different timezones.
+// Use time.Now().UTC() when setting time fields to maintain consistency.
 type Cache struct {
 	Version       string       `json:"version"`
 	LastSync      time.Time    `json:"last_sync"`
@@ -114,7 +119,7 @@ func (c *Cache) Save(cacheDir string) error {
 }
 
 func (c *Cache) AddNotifications(notifications []CacheEntry) []CacheEntry {
-	c.LastSync = time.Now()
+	c.LastSync = time.Now().UTC()
 
 	// Create map of existing notification IDs
 	existing := make(map[string]bool)
@@ -158,7 +163,7 @@ func (c *Cache) AddStarEvents(starEvents []StarEvent) []StarEvent {
 }
 
 func (c *Cache) cleanup() {
-	now := time.Now()
+	now := time.Now().UTC()
 
 	// Cleanup notifications
 	// All cached entries are unread by definition
