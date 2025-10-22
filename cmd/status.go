@@ -30,11 +30,11 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	isInstalled := systemdMgr.IsInstalled()
-	
+
 	fmt.Println("=== Service Status ===")
 	if isInstalled {
 		fmt.Println("✓ Service installed")
-		
+
 		// Get detailed status from systemctl
 		output, err := systemdMgr.Status()
 		if err != nil {
@@ -50,7 +50,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("\n=== Cache Status ===")
-	
+
 	// Check cache status
 	cache := cache.New(cacheDir)
 	if err := cache.Load(cacheDir); err != nil {
@@ -59,9 +59,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	notifications := cache.GetNotifications()
-	
+
 	fmt.Printf("Cached notifications: %d\n", len(notifications))
-	
+
 	if !cache.LastSync.IsZero() {
 		fmt.Printf("Last sync: %s\n", cache.LastSync.Format("2006-01-02 15:04:05"))
 	} else {
@@ -75,12 +75,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		if count > 5 {
 			count = 5
 		}
-		
+
 		for i := 0; i < count; i++ {
 			notif := notifications[i]
 			fmt.Printf("  • %s: %s\n", notif.Repository, truncateTitle(notif.Title))
 		}
-		
+
 		if len(notifications) > 5 {
 			fmt.Printf("  ... and %d more\n", len(notifications)-5)
 		}
@@ -91,14 +91,14 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 func parseAndDisplayStatus(output string) {
 	lines := strings.Split(output, "\n")
-	
+
 	var activeStatus, enabledStatus, lastTrigger string
 	var logLines []string
 	inLogSection := false
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		
+
 		if strings.Contains(line, "Active:") {
 			activeStatus = line
 		} else if strings.Contains(line, "Loaded:") && strings.Contains(line, "enabled") {
@@ -110,19 +110,19 @@ func parseAndDisplayStatus(output string) {
 		} else if strings.Contains(line, "Triggered:") {
 			lastTrigger = line
 		}
-		
+
 		// Collect recent log lines
 		if inLogSection && line != "" {
 			if len(logLines) < 5 {
 				logLines = append(logLines, line)
 			}
 		}
-		
+
 		if strings.Contains(line, "Journal begins") || strings.Contains(line, "Logs begin") {
 			inLogSection = true
 		}
 	}
-	
+
 	// Display parsed information
 	if activeStatus != "" {
 		if strings.Contains(activeStatus, "active (waiting)") {
@@ -133,7 +133,7 @@ func parseAndDisplayStatus(output string) {
 			fmt.Printf("Timer status: %s\n", activeStatus)
 		}
 	}
-	
+
 	if enabledStatus != "" {
 		if enabledStatus == "enabled" {
 			fmt.Printf("✓ Timer enabled: %s\n", enabledStatus)
@@ -141,11 +141,11 @@ func parseAndDisplayStatus(output string) {
 			fmt.Printf("⚠️  Timer enabled: %s\n", enabledStatus)
 		}
 	}
-	
+
 	if lastTrigger != "" {
 		fmt.Printf("Next run: %s\n", strings.TrimPrefix(lastTrigger, "Trigger: "))
 	}
-	
+
 	// Show recent logs if available
 	if len(logLines) > 0 {
 		fmt.Println("\nRecent logs:")
