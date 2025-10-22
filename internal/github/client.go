@@ -15,9 +15,12 @@ import (
 )
 
 type Client struct {
-	restClient    *api.RESTClient
-	graphqlClient *api.GraphQLClient
+	restClient    RESTClient
+	graphqlClient GraphQLClient
 }
+
+// Ensure Client implements GitHubClientInterface
+var _ GitHubClientInterface = (*Client)(nil)
 
 type Notification struct {
 	ID         string
@@ -28,6 +31,36 @@ type Notification struct {
 	UpdatedAt  time.Time
 	Unread     bool
 	URL        string
+}
+
+// ReposResponse represents the GraphQL response for fetching repositories
+type ReposResponse struct {
+	Viewer struct {
+		Repositories struct {
+			Nodes []struct {
+				NameWithOwner string `json:"nameWithOwner"`
+			} `json:"nodes"`
+		} `json:"repositories"`
+	} `json:"viewer"`
+}
+
+// StarsResponse represents the GraphQL response for fetching stargazers
+type StarsResponse struct {
+	Repository struct {
+		Stargazers struct {
+			Edges []struct {
+				StarredAt time.Time `json:"starredAt"`
+				Cursor    string    `json:"cursor"`
+				Node      struct {
+					Login string `json:"login"`
+				} `json:"node"`
+			} `json:"edges"`
+			PageInfo struct {
+				HasNextPage bool   `json:"hasNextPage"`
+				EndCursor   string `json:"endCursor"`
+			} `json:"pageInfo"`
+		} `json:"stargazers"`
+	} `json:"repository"`
 }
 
 func NewClient() (*Client, error) {
@@ -42,9 +75,17 @@ func NewClient() (*Client, error) {
 	}
 
 	return &Client{
+		restClient:    &apiRESTClient{client: restClient},
+		graphqlClient: &apiGraphQLClient{client: graphqlClient},
+	}, nil
+}
+
+// NewTestClient creates a client with injected dependencies for testing
+func NewTestClient(restClient RESTClient, graphqlClient GraphQLClient) *Client {
+	return &Client{
 		restClient:    restClient,
 		graphqlClient: graphqlClient,
-	}, nil
+	}
 }
 
 func (c *Client) FetchNotifications() ([]cache.CacheEntry, error) {
@@ -182,16 +223,6 @@ func (c *Client) FetchRecentStars(since time.Time) ([]cache.StarEvent, error) {
 		}
 	}`
 
-	type ReposResponse struct {
-		Viewer struct {
-			Repositories struct {
-				Nodes []struct {
-					NameWithOwner string `json:"nameWithOwner"`
-				} `json:"nodes"`
-			} `json:"repositories"`
-		} `json:"viewer"`
-	}
-
 	var reposResp ReposResponse
 	if err := c.graphqlClient.Do(reposQuery, nil, &reposResp); err != nil {
 		return nil, fmt.Errorf("failed to fetch repositories: %w", err)
@@ -308,24 +339,6 @@ func (c *Client) fetchStarsForRepo(repoName string, since time.Time) ([]cache.St
 				}
 			}
 		}`
-
-	type StarsResponse struct {
-		Repository struct {
-			Stargazers struct {
-				Edges []struct {
-					StarredAt time.Time `json:"starredAt"`
-					Cursor    string    `json:"cursor"`
-					Node      struct {
-						Login string `json:"login"`
-					} `json:"node"`
-				} `json:"edges"`
-				PageInfo struct {
-					HasNextPage bool   `json:"hasNextPage"`
-					EndCursor   string `json:"endCursor"`
-				} `json:"pageInfo"`
-			} `json:"stargazers"`
-		} `json:"repository"`
-	}
 
 	for page := 0; page < maxPages; page++ {
 		// Build variables map with proper typing
