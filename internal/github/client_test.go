@@ -355,15 +355,15 @@ func TestHelpers_OwnerAndName(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.input, func(t *testing.T) {
-			owner := getOwner(tc.input)
-			name := getName(tc.input)
+			owner := GetOwner(tc.input)
+			name := GetName(tc.input)
 
 			if owner != tc.expectedOwner {
-				t.Errorf("getOwner(%q) = %q, want %q", tc.input, owner, tc.expectedOwner)
+				t.Errorf("GetOwner(%q) = %q, want %q", tc.input, owner, tc.expectedOwner)
 			}
 
 			if name != tc.expectedName {
-				t.Errorf("getName(%q) = %q, want %q", tc.input, name, tc.expectedName)
+				t.Errorf("GetName(%q) = %q, want %q", tc.input, name, tc.expectedName)
 			}
 		})
 	}
