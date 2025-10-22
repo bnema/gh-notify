@@ -101,7 +101,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 		// Filter by time if since is specified
 		if since > 0 {
-			cutoff := time.Now().Add(-since)
+			cutoff := time.Now().UTC().Add(-since)
 			var filtered []cache.CacheEntry
 			for _, notif := range notifications {
 				if notif.UpdatedAt.After(cutoff) {
@@ -151,9 +151,6 @@ func runSync(cmd *cobra.Command, args []string) error {
 			Int("new_stars", len(recentStarEvents)).
 			Dur("total_duration", time.Since(startStars)).
 			Msg("Star sync completed")
-
-		// Update last event sync time (use UTC to match GitHub API)
-		c.LastEventSync = time.Now().UTC()
 	}
 
 	// Send desktop notifications for new notifications and star events
@@ -182,6 +179,20 @@ func runSync(cmd *cobra.Command, args []string) error {
 	// Save updated cache
 	if err := c.Save(cacheDir); err != nil {
 		return fmt.Errorf("failed to save cache: %w", err)
+	}
+
+	// Update last event sync time only after successful save (use UTC to match GitHub API)
+	// Only update if we actually fetched stars this run.
+	// Note: We update LastEventSync even if no new stars were found, because:
+	// - An empty result is still a successful query
+	// - We want to advance the time window for the next sync
+	// - Otherwise we'd keep re-querying the same time range
+	if !excludeStars || starsOnly {
+		c.LastEventSync = time.Now().UTC()
+		// Save again to persist the updated LastEventSync
+		if err := c.Save(cacheDir); err != nil {
+			return fmt.Errorf("failed to save cache with updated LastEventSync: %w", err)
+		}
 	}
 
 	if verbose {
