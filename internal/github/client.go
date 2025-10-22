@@ -5,9 +5,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bnema/gh-notify/internal/cache"
+	"github.com/bnema/gh-notify/internal/logger"
 	"github.com/cli/go-gh/v2/pkg/api"
 )
 
@@ -46,7 +49,7 @@ func NewClient() (*Client, error) {
 
 func (c *Client) FetchNotifications() ([]cache.CacheEntry, error) {
 	var response []map[string]interface{}
-	
+
 	// Always fetch only unread notifications (GitHub API default)
 	err := c.restClient.Get("notifications", &response)
 	if err != nil {
@@ -161,17 +164,13 @@ func (c *Client) GetAuthenticatedUser() (string, error) {
 	return login, nil
 }
 
-// FetchReceivedEvents fetches events received by the user (events on repositories they own)
-func (c *Client) FetchReceivedEvents(username string) ([]EventEntry, error) {
-	// This method is deprecated - use FetchRecentStars instead
-	return []EventEntry{}, nil
-}
-
 // FetchRecentStars fetches recent star events using GraphQL with pagination
-func (c *Client) FetchRecentStars(since time.Time) ([]StarEvent, error) {
-	var allStarEvents []StarEvent
+func (c *Client) FetchRecentStars(since time.Time) ([]cache.StarEvent, error) {
+	startTotal := time.Now()
+	var allStarEvents []cache.StarEvent
 
 	// First, get all repositories
+	startRepos := time.Now()
 	reposQuery := `
 	{
 		viewer {
@@ -198,15 +197,81 @@ func (c *Client) FetchRecentStars(since time.Time) ([]StarEvent, error) {
 		return nil, fmt.Errorf("failed to fetch repositories: %w", err)
 	}
 
-	// For each repository, fetch stars with pagination
-	for _, repo := range reposResp.Viewer.Repositories.Nodes {
-		stars, err := c.fetchStarsForRepo(repo.NameWithOwner, since)
-		if err != nil {
-			// Log error but continue with other repos
-			continue
-		}
-		allStarEvents = append(allStarEvents, stars...)
+	logger.Debug().
+		Int("repo_count", len(reposResp.Viewer.Repositories.Nodes)).
+		Dur("duration", time.Since(startRepos)).
+		Msg("Fetched repository list")
+
+	// Fetch stars concurrently with worker pool
+	const maxWorkers = 6 // Limit concurrent API calls to avoid rate limiting
+	repos := reposResp.Viewer.Repositories.Nodes
+	totalRepos := len(repos)
+
+	// Create channels for work distribution
+	repoChan := make(chan struct {
+		name  string
+		index int
+	}, totalRepos)
+
+	// Result collection with mutex for thread-safety
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var completed atomic.Int32
+
+	// Start worker pool
+	for i := 0; i < maxWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for job := range repoChan {
+				startRepo := time.Now()
+				stars, err := c.fetchStarsForRepo(job.name, since)
+
+				if err != nil {
+					logger.Warn().
+						Str("repo", job.name).
+						Int("worker", workerID).
+						Err(err).
+						Msg("Failed to fetch stars for repository")
+					completed.Add(1)
+					continue
+				}
+
+				// Thread-safe append
+				mu.Lock()
+				allStarEvents = append(allStarEvents, stars...)
+				mu.Unlock()
+
+				progress := completed.Add(1)
+				logger.Debug().
+					Str("repo", job.name).
+					Int("stars", len(stars)).
+					Int("progress", int(progress)).
+					Int("total", totalRepos).
+					Int("worker", workerID).
+					Dur("duration", time.Since(startRepo)).
+					Msg("Fetched stars for repository")
+			}
+		}(i)
 	}
+
+	// Send work to workers
+	for i, repo := range repos {
+		repoChan <- struct {
+			name  string
+			index int
+		}{name: repo.NameWithOwner, index: i}
+	}
+	close(repoChan)
+
+	// Wait for all workers to complete
+	wg.Wait()
+
+	logger.Info().
+		Int("total_stars", len(allStarEvents)).
+		Int("workers", maxWorkers).
+		Dur("total_duration", time.Since(startTotal)).
+		Msg("Completed fetching all star events")
 
 	// Sort by starred time (newest first)
 	sort.Slice(allStarEvents, func(i, j int) bool {
@@ -217,19 +282,18 @@ func (c *Client) FetchRecentStars(since time.Time) ([]StarEvent, error) {
 }
 
 // fetchStarsForRepo fetches paginated star events for a single repository
-func (c *Client) fetchStarsForRepo(repoName string, since time.Time) ([]StarEvent, error) {
+func (c *Client) fetchStarsForRepo(repoName string, since time.Time) ([]cache.StarEvent, error) {
 	const maxPages = 10 // Limit to prevent API abuse
 	const starsPerPage = 100
 
-	var allStars []StarEvent
+	var allStars []cache.StarEvent
 	var cursor *string
 
-	for page := 0; page < maxPages; page++ {
-		// Build query with optional cursor
-		query := fmt.Sprintf(`
-		query($cursor: String) {
-			repository(owner: "%s", name: "%s") {
-				stargazers(first: %d, after: $cursor, orderBy: {field: STARRED_AT, direction: DESC}) {
+	// Define query once with proper variables (not string interpolation)
+	query := `
+		query($owner: String!, $name: String!, $first: Int!, $cursor: String) {
+			repository(owner: $owner, name: $name) {
+				stargazers(first: $first, after: $cursor, orderBy: {field: STARRED_AT, direction: DESC}) {
 					edges {
 						starredAt
 						cursor
@@ -243,27 +307,33 @@ func (c *Client) fetchStarsForRepo(repoName string, since time.Time) ([]StarEven
 					}
 				}
 			}
-		}`, getOwner(repoName), getName(repoName), starsPerPage)
+		}`
 
-		type StarsResponse struct {
-			Repository struct {
-				Stargazers struct {
-					Edges []struct {
-						StarredAt time.Time `json:"starredAt"`
-						Cursor    string    `json:"cursor"`
-						Node      struct {
-							Login string `json:"login"`
-						} `json:"node"`
-					} `json:"edges"`
-					PageInfo struct {
-						HasNextPage bool   `json:"hasNextPage"`
-						EndCursor   string `json:"endCursor"`
-					} `json:"pageInfo"`
-				} `json:"stargazers"`
-			} `json:"repository"`
+	type StarsResponse struct {
+		Repository struct {
+			Stargazers struct {
+				Edges []struct {
+					StarredAt time.Time `json:"starredAt"`
+					Cursor    string    `json:"cursor"`
+					Node      struct {
+						Login string `json:"login"`
+					} `json:"node"`
+				} `json:"edges"`
+				PageInfo struct {
+					HasNextPage bool   `json:"hasNextPage"`
+					EndCursor   string `json:"endCursor"`
+				} `json:"pageInfo"`
+			} `json:"stargazers"`
+		} `json:"repository"`
+	}
+
+	for page := 0; page < maxPages; page++ {
+		// Build variables map with proper typing
+		variables := map[string]interface{}{
+			"owner": getOwner(repoName),
+			"name":  getName(repoName),
+			"first": starsPerPage,
 		}
-
-		variables := make(map[string]interface{})
 		if cursor != nil {
 			variables["cursor"] = *cursor
 		}
@@ -277,8 +347,8 @@ func (c *Client) fetchStarsForRepo(repoName string, since time.Time) ([]StarEven
 		foundOldStar := false
 		for _, edge := range response.Repository.Stargazers.Edges {
 			if edge.StarredAt.After(since) {
-				allStars = append(allStars, StarEvent{
-					ID:         fmt.Sprintf("%s-%s-%d", repoName, edge.Node.Login, edge.StarredAt.Unix()),
+				allStars = append(allStars, cache.StarEvent{
+					ID:         edge.Cursor, // Use cursor as unique ID (guaranteed unique by GitHub)
 					StarredBy:  edge.Node.Login,
 					Repository: repoName,
 					StarredAt:  edge.StarredAt,
@@ -318,7 +388,6 @@ func getName(repoFullName string) string {
 	}
 	return ""
 }
-
 
 // convertAPIURLToWeb converts GitHub API URLs to web URLs
 // Example: https://api.github.com/repos/owner/repo/issues/123 -> https://github.com/owner/repo/issues/123
