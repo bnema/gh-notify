@@ -20,6 +20,9 @@ go.work
 # Built binary
 gh-notify
 
+# Build directory
+dist/
+
 # IDE files
 .vscode/
 .idea/

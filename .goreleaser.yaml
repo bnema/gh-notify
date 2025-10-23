@@ -1,0 +1,162 @@
+# GoReleaser configuration for gh-notify
+# https://goreleaser.com
+version: 2
+
+before:
+  hooks:
+    # Run tests before building
+    - go test ./...
+
+builds:
+  - id: gh-notify
+    main: .
+    binary: gh-notify
+
+    env:
+      - CGO_ENABLED=0
+
+    goos:
+      - linux
+
+    goarch:
+      - amd64
+      - arm64
+
+    # Version information via ldflags
+    ldflags:
+      - -s -w
+      - -X github.com/bnema/gh-notify/cmd.version={{.Version}}
+      - -X github.com/bnema/gh-notify/cmd.commit={{.ShortCommit}}
+      - -X github.com/bnema/gh-notify/cmd.buildDate={{.Date}}
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - '^build\(deps\):'
+      - 'Merge pull request'
+      - 'Merge branch'
+  groups:
+    - title: 'Features'
+      regexp: '^feat(\(.+\))?:'
+      order: 0
+    - title: 'Bug Fixes'
+      regexp: '^fix(\(.+\))?:'
+      order: 1
+    - title: 'Performance'
+      regexp: '^perf(\(.+\))?:'
+      order: 2
+    - title: 'Refactoring'
+      regexp: '^refactor(\(.+\))?:'
+      order: 3
+    - title: 'Documentation'
+      regexp: '^docs(\(.+\))?:'
+      order: 4
+    - title: 'Other Changes'
+      order: 999
+
+release:
+  github:
+    owner: bnema
+    name: gh-notify
+
+  # Don't auto-publish as draft initially
+  draft: false
+
+  # Replace existing draft if it exists
+  replace_existing_draft: true
+
+  # Header for release notes
+  header: |
+    ## {{.Tag}} Release (Linux amd64 & arm64)
+
+    Released on {{.Date}}
+
+  # Footer with installation instructions
+  footer: |
+    ---
+
+    ## Installation
+
+    ### Prerequisites
+
+    gh-notify requires the [GitHub CLI (gh)](https://cli.github.com/) to be installed and authenticated:
+
+    **Arch Linux:**
+    ```bash
+    sudo pacman -S github-cli
+    gh auth login
+    ```
+
+    **Debian/Ubuntu:**
+    ```bash
+    sudo apt install gh
+    gh auth login
+    ```
+
+    ### Linux (x86_64/amd64)
+    ```bash
+    wget https://github.com/bnema/gh-notify/releases/download/{{.Tag}}/gh-notify_{{.Version}}_linux_x86_64.tar.gz
+    tar -xzf gh-notify_{{.Version}}_linux_x86_64.tar.gz
+    sudo install -m 755 gh-notify /usr/local/bin/
+    ```
+
+    ### Linux (arm64)
+    ```bash
+    wget https://github.com/bnema/gh-notify/releases/download/{{.Tag}}/gh-notify_{{.Version}}_linux_arm64.tar.gz
+    tar -xzf gh-notify_{{.Version}}_linux_arm64.tar.gz
+    sudo install -m 755 gh-notify /usr/local/bin/
+    ```
+
+    ## Usage
+
+    ```bash
+    # Sync notifications and stars
+    gh-notify sync
+
+    # List cached notifications
+    gh-notify list
+
+    # Check service status
+    gh-notify status
+
+    # Install systemd service for background monitoring
+    gh-notify install-service
+    ```
+
+    ---
+
+    **Full Changelog**: https://github.com/bnema/gh-notify/compare/{{.PreviousTag}}...{{.Tag}}
+
+  # Auto-detect prerelease from version (v1.0.0-rc1, v1.0.0-alpha, etc.)
+  prerelease: auto
+
+  # Mark as latest release
+  make_latest: true
+
+  # Replace existing release notes
+  mode: replace
