@@ -32,7 +32,7 @@ Description=Run GitHub notification sync every {{.Interval}}
 Requires=gh-notify.service
 
 [Timer]
-OnBootSec=30s
+OnBootSec=60s
 OnUnitActiveSec={{.Interval}}
 AccuracySec=1s
 Persistent=true
@@ -56,7 +56,7 @@ func NewSystemdManager() (*SystemdManager, error) {
 	}
 
 	serviceDir := filepath.Join(homeDir, ".config", "systemd", "user")
-	
+
 	return &SystemdManager{
 		serviceDir: serviceDir,
 	}, nil
@@ -134,7 +134,7 @@ func (sm *SystemdManager) Uninstall() error {
 func (sm *SystemdManager) Status() (string, error) {
 	cmd := exec.Command("systemctl", "--user", "status", "gh-notify.timer", "--no-pager")
 	output, _ := cmd.CombinedOutput()
-	
+
 	// systemctl status returns non-zero exit code for inactive services, but that's not an error for us
 	return string(output), nil
 }
@@ -190,7 +190,7 @@ func (sm *SystemdManager) writeTimerFile(data TemplateData) error {
 func (sm *SystemdManager) runSystemctl(args ...string) error {
 	cmdArgs := append([]string{"--user"}, args...)
 	cmd := exec.Command("systemctl", cmdArgs...)
-	
+
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("systemctl %s failed: %s", strings.Join(args, " "), string(output))
 	}
@@ -210,13 +210,13 @@ func (sm *SystemdManager) showDryRun(data TemplateData) error {
 	if err := tmpl.Execute(os.Stdout, data); err != nil {
 		fmt.Printf("Error displaying service template: %v\n", err)
 	}
-	
+
 	fmt.Println("\n--- gh-notify.timer ---")
 	tmpl, _ = template.New("timer").Parse(timerTemplate)
 	if err := tmpl.Execute(os.Stdout, data); err != nil {
 		fmt.Printf("Error displaying timer template: %v\n", err)
 	}
-	
+
 	fmt.Println("\n--- Commands to run ---")
 	fmt.Println("systemctl --user daemon-reload")
 	fmt.Println("systemctl --user enable gh-notify.timer")
@@ -238,9 +238,9 @@ func formatDuration(d time.Duration) string {
 func (sm *SystemdManager) IsInstalled() bool {
 	serviceFile := filepath.Join(sm.serviceDir, "gh-notify.service")
 	timerFile := filepath.Join(sm.serviceDir, "gh-notify.timer")
-	
+
 	_, serviceExists := os.Stat(serviceFile)
 	_, timerExists := os.Stat(timerFile)
-	
+
 	return serviceExists == nil && timerExists == nil
 }

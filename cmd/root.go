@@ -61,4 +61,3 @@ func initConfig() {
 		cacheDir = defaultCacheDir
 	}
 }
-
