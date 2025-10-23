@@ -79,7 +79,7 @@ func (e EventEntry) GetRepositoryOwner() string {
 	
 	// Split by "/" and get the first part (owner)
 	parts := strings.Split(repoName, "/")
-	if len(parts) >= 1 {
+	if len(parts) >= 2 {
 		return parts[0]
 	}
 	
