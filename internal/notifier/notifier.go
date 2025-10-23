@@ -114,9 +114,14 @@ func (n *Notifier) formatStarBulkMessage(starEvents []cache.StarEvent) string {
 		
 		if len(users) == 1 {
 			lines = append(lines, fmt.Sprintf("• %s starred %s", users[0], repo))
-		} else {
+		} else if len(users) <= 5 {
 			userList := strings.Join(users, ", ")
 			lines = append(lines, fmt.Sprintf("• %s starred %s", userList, repo))
+		} else {
+			// Cap display at 3 users + "and X others" to prevent spam
+			first3 := strings.Join(users[:3], ", ")
+			remaining := len(users) - 3
+			lines = append(lines, fmt.Sprintf("• %s and %d others starred %s", first3, remaining, repo))
 		}
 		count++
 	}
