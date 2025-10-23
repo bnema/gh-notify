@@ -1,4 +1,4 @@
-.PHONY: install-tools generate-mocks test test-coverage clean-mocks build build-dev install help
+.PHONY: install-tools generate-mocks test test-coverage clean-mocks build build-dev install release help
 
 # Version information
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -57,12 +57,19 @@ install: build
 	@sudo install -m 755 gh-notify /usr/local/bin/
 	@echo "✓ Installed: /usr/local/bin/gh-notify"
 
+# Create release with GoReleaser
+release:
+	@echo "Creating release with GoReleaser..."
+	@goreleaser release --clean
+	@echo "✓ Release complete"
+
 # Show help
 help:
 	@echo "Available targets:"
 	@echo "  build            - Build gh-notify with version information"
 	@echo "  build-dev        - Build without optimizations (for debugging)"
 	@echo "  install          - Build and install to /usr/local/bin"
+	@echo "  release          - Create release with GoReleaser"
 	@echo "  install-tools    - Install mockgen and other dev tools"
 	@echo "  generate-mocks   - Generate mock files from interfaces"
 	@echo "  test             - Run all tests"

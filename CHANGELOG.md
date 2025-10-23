@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `make release` command for automated releases via GoReleaser
+
 ## [1.2.0] - 2025-10-23
 
 ### Added
