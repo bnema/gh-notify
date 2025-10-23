@@ -132,7 +132,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		// Get cutoff time - only check for stars since last sync
 		cutoff := c.LastEventSync
 		if cutoff.IsZero() {
-			// If no previous sync, only show stars from last 4 hours to avoid missing recent events
+			// If no previous sync, only show stars from last 4 hours to avoid overwhelming users with historical star data on initial sync
 			cutoff = time.Now().UTC().Add(-4 * time.Hour)
 		}
 
