@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `make release` command for automated releases via GoReleaser
 
+## [1.2.1] - 2025-10-24
+
+### Fixed
+- GraphQL API rate limit exhaustion by implementing hourly rate limiting for star fetching
+- Waybar mode making redundant API calls by using cached star data
+
 ## [1.2.0] - 2025-10-23
 
 ### Added
@@ -89,7 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unread-only cache management to reduce noise
 - MIT License
 
-[Unreleased]: https://github.com/bnema/gh-notify/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/bnema/gh-notify/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/bnema/gh-notify/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/bnema/gh-notify/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/bnema/gh-notify/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/bnema/gh-notify/releases/tag/v1.0.0
