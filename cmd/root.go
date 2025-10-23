@@ -12,6 +12,11 @@ var (
 	cacheDir string
 	verbose  bool
 	cfgFile  string
+
+	// Version information (injected at build time via ldflags)
+	version   = "dev"
+	commit    = "none"
+	buildDate = "unknown"
 )
 
 var rootCmd = &cobra.Command{
@@ -24,7 +29,7 @@ maintains a smart cache of notifications requiring attention, and sends desktop 
 for new items.
 
 Perfect for running as a systemd service to get real-time notifications.`,
-	Version: "1.0.0",
+	Version: version,
 }
 
 func Execute() {
@@ -35,6 +40,9 @@ func Execute() {
 }
 
 func init() {
+	// Set custom version template to show commit and build date
+	rootCmd.SetVersionTemplate(fmt.Sprintf("gh-notify version %s (commit: %s, built: %s)\n", version, commit, buildDate))
+
 	cobra.OnInitialize(initConfig)
 
 	// Global flags
