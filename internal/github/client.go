@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/bnema/gh-notify/internal/cache"
@@ -166,76 +167,155 @@ func (c *Client) FetchReceivedEvents(username string) ([]EventEntry, error) {
 	return []EventEntry{}, nil
 }
 
-// FetchRecentStars fetches recent star events using GraphQL
+// FetchRecentStars fetches recent star events using GraphQL with pagination
 func (c *Client) FetchRecentStars(since time.Time) ([]StarEvent, error) {
-	// Use GraphQL to get all repositories with recent stargazers
-	query := `
+	var allStarEvents []StarEvent
+
+	// First, get all repositories
+	reposQuery := `
 	{
 		viewer {
 			repositories(first: 100, ownerAffiliations: OWNER) {
 				nodes {
 					nameWithOwner
-					stargazers(last: 20, orderBy: {field: STARRED_AT, direction: DESC}) {
-						edges {
-							starredAt
-							node {
-								login
-							}
-						}
-					}
-				}
-				pageInfo {
-					hasNextPage
-					endCursor
 				}
 			}
 		}
 	}`
 
-	type GraphQLResponse struct {
+	type ReposResponse struct {
 		Viewer struct {
 			Repositories struct {
 				Nodes []struct {
 					NameWithOwner string `json:"nameWithOwner"`
-					Stargazers    struct {
-						Edges []struct {
-							StarredAt time.Time `json:"starredAt"`
-							Node      struct {
-								Login string `json:"login"`
-							} `json:"node"`
-						} `json:"edges"`
-					} `json:"stargazers"`
 				} `json:"nodes"`
 			} `json:"repositories"`
 		} `json:"viewer"`
 	}
 
-	var response GraphQLResponse
-	err := c.graphqlClient.Do(query, nil, &response)
-	if err != nil {
+	var reposResp ReposResponse
+	if err := c.graphqlClient.Do(reposQuery, nil, &reposResp); err != nil {
 		return nil, fmt.Errorf("failed to fetch repositories: %w", err)
 	}
 
-	var starEvents []StarEvent
-	for _, repo := range response.Viewer.Repositories.Nodes {
-		for _, edge := range repo.Stargazers.Edges {
-			// Only include stars that happened after the 'since' time
-			if edge.StarredAt.After(since) {
-				starEvents = append(starEvents, StarEvent{
-					StarredBy:   edge.Node.Login,
-					Repository:  repo.NameWithOwner,
-					StarredAt:   edge.StarredAt,
-				})
-			}
+	// For each repository, fetch stars with pagination
+	for _, repo := range reposResp.Viewer.Repositories.Nodes {
+		stars, err := c.fetchStarsForRepo(repo.NameWithOwner, since)
+		if err != nil {
+			// Log error but continue with other repos
+			continue
 		}
+		allStarEvents = append(allStarEvents, stars...)
 	}
 
 	// Sort by starred time (newest first)
-	sort.Slice(starEvents, func(i, j int) bool {
-		return starEvents[i].StarredAt.After(starEvents[j].StarredAt)
+	sort.Slice(allStarEvents, func(i, j int) bool {
+		return allStarEvents[i].StarredAt.After(allStarEvents[j].StarredAt)
 	})
 
-	return starEvents, nil
+	return allStarEvents, nil
+}
+
+// fetchStarsForRepo fetches paginated star events for a single repository
+func (c *Client) fetchStarsForRepo(repoName string, since time.Time) ([]StarEvent, error) {
+	const maxPages = 10 // Limit to prevent API abuse
+	const starsPerPage = 100
+
+	var allStars []StarEvent
+	var cursor *string
+
+	for page := 0; page < maxPages; page++ {
+		// Build query with optional cursor
+		query := fmt.Sprintf(`
+		query($cursor: String) {
+			repository(owner: "%s", name: "%s") {
+				stargazers(first: %d, after: $cursor, orderBy: {field: STARRED_AT, direction: DESC}) {
+					edges {
+						starredAt
+						cursor
+						node {
+							login
+						}
+					}
+					pageInfo {
+						hasNextPage
+						endCursor
+					}
+				}
+			}
+		}`, getOwner(repoName), getName(repoName), starsPerPage)
+
+		type StarsResponse struct {
+			Repository struct {
+				Stargazers struct {
+					Edges []struct {
+						StarredAt time.Time `json:"starredAt"`
+						Cursor    string    `json:"cursor"`
+						Node      struct {
+							Login string `json:"login"`
+						} `json:"node"`
+					} `json:"edges"`
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
+				} `json:"stargazers"`
+			} `json:"repository"`
+		}
+
+		variables := make(map[string]interface{})
+		if cursor != nil {
+			variables["cursor"] = *cursor
+		}
+
+		var response StarsResponse
+		if err := c.graphqlClient.Do(query, variables, &response); err != nil {
+			return allStars, fmt.Errorf("failed to fetch stars for %s: %w", repoName, err)
+		}
+
+		// Process stars from this page
+		foundOldStar := false
+		for _, edge := range response.Repository.Stargazers.Edges {
+			if edge.StarredAt.After(since) {
+				allStars = append(allStars, StarEvent{
+					StarredBy:  edge.Node.Login,
+					Repository: repoName,
+					StarredAt:  edge.StarredAt,
+				})
+			} else {
+				// Found a star older than our cutoff, no need to fetch more pages
+				foundOldStar = true
+				break
+			}
+		}
+
+		// Stop if we found old stars or no more pages
+		if foundOldStar || !response.Repository.Stargazers.PageInfo.HasNextPage {
+			break
+		}
+
+		// Prepare for next page
+		cursor = &response.Repository.Stargazers.PageInfo.EndCursor
+	}
+
+	return allStars, nil
+}
+
+// Helper functions to parse owner/name from "owner/repo" format
+func getOwner(repoFullName string) string {
+	parts := strings.Split(repoFullName, "/")
+	if len(parts) >= 1 {
+		return parts[0]
+	}
+	return ""
+}
+
+func getName(repoFullName string) string {
+	parts := strings.Split(repoFullName, "/")
+	if len(parts) >= 2 {
+		return parts[1]
+	}
+	return ""
 }
 
 
