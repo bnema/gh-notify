@@ -25,23 +25,23 @@ func TestSync_FirstStarSync_4HourCutoff(t *testing.T) {
 		t.Errorf("Expected LastEventSync to be zero for first sync, got %v", c.LastEventSync)
 	}
 
-	// In the real sync command, when LastEventSync is zero, it uses 4 hours ago as cutoff
+	// In the real sync command, when LastEventSync is zero, it uses initialStarSyncCutoff as cutoff
 	// Let's verify the logic of what should happen
-	expectedCutoff := time.Now().UTC().Add(-4 * time.Hour)
+	expectedCutoff := time.Now().UTC().Add(-initialStarSyncCutoff)
 
 	// Simulate what the sync command does
 	cutoff := c.LastEventSync
 	if cutoff.IsZero() {
-		cutoff = time.Now().UTC().Add(-4 * time.Hour)
+		cutoff = time.Now().UTC().Add(-initialStarSyncCutoff)
 	}
 
-	// Verify cutoff is approximately 4 hours ago (within 1 minute tolerance)
+	// Verify cutoff is approximately initialStarSyncCutoff ago (within 1 minute tolerance)
 	diff := cutoff.Sub(expectedCutoff)
 	if diff < -1*time.Minute || diff > 1*time.Minute {
-		t.Errorf("Expected cutoff to be ~4 hours ago, got %v (diff: %v)", cutoff, diff)
+		t.Errorf("Expected cutoff to be ~%v ago, got %v (diff: %v)", initialStarSyncCutoff, cutoff, diff)
 	}
 
-	t.Logf("✓ First sync 4-hour cutoff test passed!")
+	t.Logf("✓ First sync initial cutoff test passed!")
 }
 
 // TestSync_SubsequentSync_UsesLastEventSync tests that subsequent syncs use LastEventSync
@@ -76,7 +76,7 @@ func TestSync_SubsequentSync_UsesLastEventSync(t *testing.T) {
 	// In subsequent syncs, should use LastEventSync as cutoff
 	cutoff := c2.LastEventSync
 	if cutoff.IsZero() {
-		cutoff = time.Now().UTC().Add(-4 * time.Hour)
+		cutoff = time.Now().UTC().Add(-initialStarSyncCutoff)
 	}
 
 	// Verify we're using the previous sync time (within 1 second tolerance)
@@ -252,4 +252,56 @@ func TestSync_StarCleanup(t *testing.T) {
 	}
 
 	t.Logf("✓ Star cleanup test passed!")
+}
+
+// TestSync_RateLimitCheck tests that stars are only fetched once per hour
+func TestSync_RateLimitCheck(t *testing.T) {
+	// Create temp cache dir
+	tmpDir, err := os.MkdirTemp("", "gh-notify-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmpDir) })
+
+	c := cache.New(tmpDir)
+
+	// Scenario 1: First sync (LastEventSync is zero) - should fetch
+	if !c.LastEventSync.IsZero() {
+		t.Error("Expected LastEventSync to be zero initially")
+	}
+	shouldFetch1 := c.LastEventSync.IsZero()
+	if !shouldFetch1 {
+		t.Error("Expected to fetch stars on first sync")
+	}
+	t.Log("✓ First sync should fetch stars")
+
+	// Simulate successful fetch
+	c.LastEventSync = time.Now().UTC()
+	if err := c.Save(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Scenario 2: Second sync 30 minutes later - should NOT fetch
+	c2 := cache.New(tmpDir)
+	if err := c2.Load(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	timeSinceLastFetch := time.Since(c2.LastEventSync)
+	shouldFetch2 := c2.LastEventSync.IsZero() || timeSinceLastFetch >= starFetchRateLimit
+	if shouldFetch2 {
+		t.Errorf("Expected to skip fetch when only %v has passed (< %v)", timeSinceLastFetch, starFetchRateLimit)
+	}
+	t.Logf("✓ Second sync after %v should skip fetch (rate limited)", timeSinceLastFetch)
+
+	// Scenario 3: Third sync after starFetchRateLimit - should fetch
+	c3 := cache.New(tmpDir)
+	c3.LastEventSync = time.Now().UTC().Add(-(starFetchRateLimit + 1*time.Minute)) // Just over the rate limit
+	timeSinceLastFetch3 := time.Since(c3.LastEventSync)
+	shouldFetch3 := c3.LastEventSync.IsZero() || timeSinceLastFetch3 >= starFetchRateLimit
+	if !shouldFetch3 {
+		t.Errorf("Expected to fetch stars when %v has passed (>= %v)", timeSinceLastFetch3, starFetchRateLimit)
+	}
+	t.Logf("✓ Third sync after %v should fetch stars", timeSinceLastFetch3)
+
+	t.Logf("✓ Rate limit check test passed!")
 }

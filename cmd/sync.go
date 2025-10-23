@@ -16,6 +16,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	// Star fetching rate limit - only fetch stars once per hour to avoid GraphQL API limits
+	starFetchRateLimit = 1 * time.Hour
+	// Initial star sync cutoff - on first sync, only fetch stars from last 4 hours
+	// to avoid overwhelming users with historical data
+	initialStarSyncCutoff = 4 * time.Hour
+	// Waybar tooltip star window - show stars from last hour in waybar tooltip
+	waybarStarWindow = 1 * time.Hour
+)
+
 var (
 	noNotify     bool
 	since        time.Duration
@@ -127,30 +137,42 @@ func runSync(cmd *cobra.Command, args []string) error {
 	// Fetch star events if not excluded (stars are tracked by default)
 	var recentStarEvents []cache.StarEvent
 	if !excludeStars || starsOnly {
-		// Get cutoff time - only check for stars since last sync
-		cutoff := c.LastEventSync
-		if cutoff.IsZero() {
-			// If no previous sync, only show stars from last 4 hours to avoid overwhelming users with historical star data on initial sync
-			cutoff = time.Now().UTC().Add(-4 * time.Hour)
-			logger.Info().Time("cutoff", cutoff).Msg("First star sync - using 4 hour cutoff")
+		// Rate limit: only fetch stars if at least starFetchRateLimit has passed since last fetch
+		timeSinceLastFetch := time.Since(c.LastEventSync)
+		if !c.LastEventSync.IsZero() && timeSinceLastFetch < starFetchRateLimit {
+			logger.Info().
+				Dur("time_since_last_fetch", timeSinceLastFetch).
+				Dur("time_until_next_fetch", starFetchRateLimit-timeSinceLastFetch).
+				Msg("Skipping star fetch - rate limit (fetches limited to once per hour)")
 		} else {
-			logger.Debug().Time("cutoff", cutoff).Msg("Using last sync time as cutoff")
+			// Get cutoff time - only check for stars since last sync
+			cutoff := c.LastEventSync
+			if cutoff.IsZero() {
+				// If no previous sync, only show stars from initialStarSyncCutoff to avoid overwhelming users with historical star data on initial sync
+				cutoff = time.Now().UTC().Add(-initialStarSyncCutoff)
+				logger.Info().Time("cutoff", cutoff).Msg("First star sync - using initial cutoff")
+			} else {
+				logger.Debug().Time("cutoff", cutoff).Msg("Using last sync time as cutoff")
+			}
+
+			startStars := time.Now()
+			logger.Info().Msg("Fetching star events using GraphQL...")
+			starEvents, err := ghClient.FetchRecentStars(cutoff)
+			if err != nil {
+				return fmt.Errorf("failed to fetch star events: %w", err)
+			}
+
+			// Add to cache and get only new stars
+			recentStarEvents = c.AddStarEvents(starEvents)
+
+			logger.Info().
+				Int("new_stars", len(recentStarEvents)).
+				Dur("total_duration", time.Since(startStars)).
+				Msg("Star sync completed")
+
+			// Update last event sync time after successful fetch (use UTC to match GitHub API)
+			c.LastEventSync = time.Now().UTC()
 		}
-
-		startStars := time.Now()
-		logger.Info().Msg("Fetching star events using GraphQL...")
-		starEvents, err := ghClient.FetchRecentStars(cutoff)
-		if err != nil {
-			return fmt.Errorf("failed to fetch star events: %w", err)
-		}
-
-		// Add to cache and get only new stars
-		recentStarEvents = c.AddStarEvents(starEvents)
-
-		logger.Info().
-			Int("new_stars", len(recentStarEvents)).
-			Dur("total_duration", time.Since(startStars)).
-			Msg("Star sync completed")
 	}
 
 	// Send desktop notifications for new notifications and star events
@@ -176,23 +198,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Save updated cache
+	// Save updated cache (includes LastEventSync if stars were fetched)
 	if err := c.Save(cacheDir); err != nil {
 		return fmt.Errorf("failed to save cache: %w", err)
-	}
-
-	// Update last event sync time only after successful save (use UTC to match GitHub API)
-	// Only update if we actually fetched stars this run.
-	// Note: We update LastEventSync even if no new stars were found, because:
-	// - An empty result is still a successful query
-	// - We want to advance the time window for the next sync
-	// - Otherwise we'd keep re-querying the same time range
-	if !excludeStars || starsOnly {
-		c.LastEventSync = time.Now().UTC()
-		// Save again to persist the updated LastEventSync
-		if err := c.Save(cacheDir); err != nil {
-			return fmt.Errorf("failed to save cache with updated LastEventSync: %w", err)
-		}
 	}
 
 	if verbose {
@@ -203,12 +211,15 @@ func runSync(cmd *cobra.Command, args []string) error {
 	if waybarOutput {
 		totalNotifications := len(c.GetNotifications())
 
-		// Get stars from last hour for tooltip (always fetch for waybar)
+		// Get stars from cache for tooltip (respects rate limiting)
+		// Filter cached stars to only show those from the waybar window
 		var recentTooltipStars []cache.StarEvent
-		oneHourAgo := time.Now().UTC().Add(-1 * time.Hour)
-		tooltipStars, err := ghClient.FetchRecentStars(oneHourAgo)
-		if err == nil {
-			recentTooltipStars = tooltipStars
+		starWindowCutoff := time.Now().UTC().Add(-waybarStarWindow)
+		allStars := c.GetStars()
+		for _, star := range allStars {
+			if star.StarredAt.After(starWindowCutoff) {
+				recentTooltipStars = append(recentTooltipStars, star)
+			}
 		}
 
 		var waybar WaybarOutput
