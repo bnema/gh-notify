@@ -16,11 +16,11 @@ import (
 )
 
 var (
-	noNotify      bool
-	since         time.Duration
-	waybarOutput  bool
-	includeStars  bool
-	starsOnly     bool
+	noNotify     bool
+	since        time.Duration
+	waybarOutput bool
+	excludeStars bool
+	starsOnly    bool
 )
 
 type WaybarOutput struct {
@@ -51,7 +51,7 @@ func init() {
 	syncCmd.Flags().BoolVar(&noNotify, "no-notify", false, "skip desktop notifications, just update cache")
 	syncCmd.Flags().DurationVar(&since, "since", 0, "only check notifications updated since duration ago (e.g., 1h, 30m)")
 	syncCmd.Flags().BoolVar(&waybarOutput, "waybar-output", false, "output JSON for waybar integration")
-	syncCmd.Flags().BoolVar(&includeStars, "include-stars", true, "track star events in addition to notifications")
+	syncCmd.Flags().BoolVar(&excludeStars, "exclude-stars", false, "skip star tracking (stars are tracked by default)")
 	syncCmd.Flags().BoolVar(&starsOnly, "stars-only", false, "only check for star events, skip regular notifications")
 }
 
@@ -122,9 +122,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Fetch star events if enabled (but don't cache them)
+	// Fetch star events if not excluded (stars are tracked by default)
 	var recentStarEvents []github.StarEvent
-	if includeStars || starsOnly {
+	if !excludeStars || starsOnly {
 		if verbose {
 			fmt.Println("Fetching star events using GraphQL...")
 		}
@@ -249,6 +249,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 }
 
 func buildTooltip(notifications []cache.CacheEntry, recentStars []github.StarEvent) string {
+	const maxLineLen = 80 // Maximum characters per tooltip line
 	var tooltip strings.Builder
 	
 	// Add notifications section
@@ -275,7 +276,8 @@ func buildTooltip(notifications []cache.CacheEntry, recentStars []github.StarEve
 
 			// Format notification with Nerd Font icon
 			icon := getNotificationIcon(notif.Reason, notif.Type)
-			tooltip.WriteString(fmt.Sprintf("  %s %s (%s)\n", icon, notif.Title, notif.Reason))
+			line := fmt.Sprintf("  %s %s (%s)", icon, notif.Title, notif.Reason)
+			tooltip.WriteString(truncateString(line, maxLineLen) + "\n")
 		}
 	}
 	
@@ -293,8 +295,9 @@ func buildTooltip(notifications []cache.CacheEntry, recentStars []github.StarEve
 		
 		for _, star := range recentStars {
 			timeAgo := time.Since(star.StarredAt).Round(time.Minute)
-			tooltip.WriteString(fmt.Sprintf("  %s %s starred %s (%v ago)\n", 
-				nerdfonts.StarredRepo, star.StarredBy, star.Repository, timeAgo))
+			line := fmt.Sprintf("  %s %s starred %s (%v ago)",
+				nerdfonts.StarredRepo, star.StarredBy, star.Repository, timeAgo)
+			tooltip.WriteString(truncateString(line, maxLineLen) + "\n")
 		}
 	}
 	
