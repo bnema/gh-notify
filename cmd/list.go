@@ -97,7 +97,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Rows
-	now := time.Now()
+	now := time.Now().UTC()
 	for i, notif := range notifications {
 		age := formatAge(now.Sub(notif.UpdatedAt))
 		title := truncateString(notif.Title, 40)

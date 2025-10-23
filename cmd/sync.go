@@ -10,6 +10,7 @@ import (
 
 	"github.com/bnema/gh-notify/internal/cache"
 	"github.com/bnema/gh-notify/internal/github"
+	"github.com/bnema/gh-notify/internal/logger"
 	"github.com/bnema/gh-notify/internal/nerdfonts"
 	"github.com/bnema/gh-notify/internal/notifier"
 	"github.com/spf13/cobra"
@@ -19,6 +20,8 @@ var (
 	noNotify     bool
 	since        time.Duration
 	waybarOutput bool
+	excludeStars bool
+	starsOnly    bool
 )
 
 type WaybarOutput struct {
@@ -49,12 +52,15 @@ func init() {
 	syncCmd.Flags().BoolVar(&noNotify, "no-notify", false, "skip desktop notifications, just update cache")
 	syncCmd.Flags().DurationVar(&since, "since", 0, "only check notifications updated since duration ago (e.g., 1h, 30m)")
 	syncCmd.Flags().BoolVar(&waybarOutput, "waybar-output", false, "output JSON for waybar integration")
+	syncCmd.Flags().BoolVar(&excludeStars, "exclude-stars", false, "skip star tracking (stars are tracked by default)")
+	syncCmd.Flags().BoolVar(&starsOnly, "stars-only", false, "only check for star events, skip regular notifications")
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
-	if verbose {
-		fmt.Printf("Starting sync with cache directory: %s\n", cacheDir)
-	}
+	// Initialize logger
+	logger.Init(verbose)
+
+	logger.Info().Str("cache_dir", cacheDir).Msg("Starting sync")
 
 	// Initialize cache
 	c := cache.New(cacheDir)
@@ -62,11 +68,10 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load cache: %w", err)
 	}
 
-	if verbose {
-		fmt.Printf("Loaded cache with %d existing notifications\n", len(c.GetNotifications()))
-	}
+	logger.Debug().Int("cached_notifications", len(c.GetNotifications())).Msg("Cache loaded")
 
 	// Initialize GitHub client
+	startAuth := time.Now()
 	ghClient, err := github.NewClient()
 	if err != nil {
 		return fmt.Errorf("failed to create GitHub client: %w", err)
@@ -77,57 +82,117 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("GitHub authentication failed: %w", err)
 	}
 
-	if verbose {
-		fmt.Println("GitHub authentication successful")
-	}
+	logger.Debug().Dur("duration", time.Since(startAuth)).Msg("GitHub authentication successful")
 
-	// Fetch notifications
-	notifications, err := ghClient.FetchNotifications()
-	if err != nil {
-		return fmt.Errorf("failed to fetch notifications: %w", err)
-	}
+	var newNotifications []cache.CacheEntry
 
-	if verbose {
-		fmt.Printf("Fetched %d notifications from GitHub\n", len(notifications))
-	}
+	// Fetch notifications (unless stars-only mode)
+	if !starsOnly {
+		startNotif := time.Now()
+		notifications, err := ghClient.FetchNotifications()
+		if err != nil {
+			return fmt.Errorf("failed to fetch notifications: %w", err)
+		}
 
-	// Filter by time if since is specified
-	if since > 0 {
-		cutoff := time.Now().Add(-since)
-		var filtered []cache.CacheEntry
-		for _, notif := range notifications {
-			if notif.UpdatedAt.After(cutoff) {
-				filtered = append(filtered, notif)
+		logger.Debug().
+			Int("count", len(notifications)).
+			Dur("duration", time.Since(startNotif)).
+			Msg("Fetched notifications from GitHub")
+
+		// Filter by time if since is specified
+		if since > 0 {
+			cutoff := time.Now().UTC().Add(-since)
+			var filtered []cache.CacheEntry
+			for _, notif := range notifications {
+				if notif.UpdatedAt.After(cutoff) {
+					filtered = append(filtered, notif)
+				}
 			}
-		}
-		notifications = filtered
+			notifications = filtered
 
-		if verbose {
-			fmt.Printf("Filtered to %d notifications updated since %v ago\n", len(notifications), since)
+			logger.Debug().
+				Int("filtered_count", len(filtered)).
+				Dur("since", since).
+				Msg("Filtered notifications by time")
 		}
+
+		// Add notifications to cache and get new ones
+		newNotifications = c.AddNotifications(notifications)
+
+		logger.Info().
+			Int("new_count", len(newNotifications)).
+			Msg("New notifications found")
 	}
 
-	// Add notifications to cache and get new ones
-	newNotifications := c.AddNotifications(notifications)
+	// Fetch star events if not excluded (stars are tracked by default)
+	var recentStarEvents []cache.StarEvent
+	if !excludeStars || starsOnly {
+		// Get cutoff time - only check for stars since last sync
+		cutoff := c.LastEventSync
+		if cutoff.IsZero() {
+			// If no previous sync, only show stars from last 4 hours to avoid overwhelming users with historical star data on initial sync
+			cutoff = time.Now().UTC().Add(-4 * time.Hour)
+			logger.Info().Time("cutoff", cutoff).Msg("First star sync - using 4 hour cutoff")
+		} else {
+			logger.Debug().Time("cutoff", cutoff).Msg("Using last sync time as cutoff")
+		}
 
-	if verbose {
-		fmt.Printf("Found %d new notifications\n", len(newNotifications))
+		startStars := time.Now()
+		logger.Info().Msg("Fetching star events using GraphQL...")
+		starEvents, err := ghClient.FetchRecentStars(cutoff)
+		if err != nil {
+			return fmt.Errorf("failed to fetch star events: %w", err)
+		}
+
+		// Add to cache and get only new stars
+		recentStarEvents = c.AddStarEvents(starEvents)
+
+		logger.Info().
+			Int("new_stars", len(recentStarEvents)).
+			Dur("total_duration", time.Since(startStars)).
+			Msg("Star sync completed")
 	}
 
-	// Send desktop notifications for new notifications
-	if !noNotify && len(newNotifications) > 0 {
+	// Send desktop notifications for new notifications and star events
+	if !noNotify {
 		notifier := notifier.New(true)
 
-		if err := notifier.SendBulkNotification(newNotifications); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to send desktop notification: %v\n", err)
-		} else if verbose {
-			fmt.Println("Desktop notification sent")
+		// Send notifications for regular GitHub notifications
+		if len(newNotifications) > 0 {
+			if err := notifier.SendBulkNotification(newNotifications); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to send desktop notification: %v\n", err)
+			} else if verbose {
+				fmt.Println("Desktop notification sent for regular notifications")
+			}
+		}
+
+		// Send notifications for new star events
+		if len(recentStarEvents) > 0 {
+			if err := notifier.SendStarNotifications(recentStarEvents); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to send star notification: %v\n", err)
+			} else if verbose {
+				fmt.Println("Desktop notification sent for new stars")
+			}
 		}
 	}
 
 	// Save updated cache
 	if err := c.Save(cacheDir); err != nil {
 		return fmt.Errorf("failed to save cache: %w", err)
+	}
+
+	// Update last event sync time only after successful save (use UTC to match GitHub API)
+	// Only update if we actually fetched stars this run.
+	// Note: We update LastEventSync even if no new stars were found, because:
+	// - An empty result is still a successful query
+	// - We want to advance the time window for the next sync
+	// - Otherwise we'd keep re-querying the same time range
+	if !excludeStars || starsOnly {
+		c.LastEventSync = time.Now().UTC()
+		// Save again to persist the updated LastEventSync
+		if err := c.Save(cacheDir); err != nil {
+			return fmt.Errorf("failed to save cache with updated LastEventSync: %w", err)
+		}
 	}
 
 	if verbose {
@@ -138,16 +203,34 @@ func runSync(cmd *cobra.Command, args []string) error {
 	if waybarOutput {
 		totalNotifications := len(c.GetNotifications())
 
+		// Get stars from last hour for tooltip (always fetch for waybar)
+		var recentTooltipStars []cache.StarEvent
+		oneHourAgo := time.Now().UTC().Add(-1 * time.Hour)
+		tooltipStars, err := ghClient.FetchRecentStars(oneHourAgo)
+		if err == nil {
+			recentTooltipStars = tooltipStars
+		}
+
 		var waybar WaybarOutput
-		if totalNotifications > 0 {
+		totalCount := totalNotifications + len(recentTooltipStars)
+		if totalCount > 0 {
+			var text string
+			if totalNotifications > 0 && len(recentTooltipStars) > 0 {
+				text = fmt.Sprintf("%s (%d) %s (%d)", nerdfonts.GitHub, totalNotifications, nerdfonts.StarredRepo, len(recentTooltipStars))
+			} else if totalNotifications > 0 {
+				text = fmt.Sprintf("%s (%d)", nerdfonts.GitHub, totalNotifications)
+			} else {
+				text = fmt.Sprintf("%s (%d)", nerdfonts.StarredRepo, len(recentTooltipStars))
+			}
+
 			waybar = WaybarOutput{
-				Text:    fmt.Sprintf("%s (%d)", nerdfonts.GitHub, totalNotifications),
-				Tooltip: buildTooltip(c.GetNotifications()),
+				Text:    text,
+				Tooltip: buildTooltip(c.GetNotifications(), recentTooltipStars),
 			}
 		} else {
 			waybar = WaybarOutput{
 				Text:    fmt.Sprintf("%s (0)", nerdfonts.GitHub),
-				Tooltip: "No notifications",
+				Tooltip: "No notifications or recent stars",
 			}
 		}
 
@@ -161,47 +244,81 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output summary
+	var summaryParts []string
 	if len(newNotifications) > 0 {
-		fmt.Printf("✓ %d new notifications found\n", len(newNotifications))
+		summaryParts = append(summaryParts, fmt.Sprintf("%d new notifications", len(newNotifications)))
+	}
+	if len(recentStarEvents) > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d new stars", len(recentStarEvents)))
+	}
+
+	if len(summaryParts) > 0 {
+		fmt.Printf("✓ %s found\n", strings.Join(summaryParts, " and "))
 		if !noNotify {
-			fmt.Println("✓ Desktop notification sent")
+			fmt.Println("✓ Desktop notifications sent")
 		}
 	} else {
-		fmt.Println("✓ No new notifications")
+		fmt.Println("✓ No new notifications or stars")
 	}
 
 	return nil
 }
 
-func buildTooltip(notifications []cache.CacheEntry) string {
-	if len(notifications) == 0 {
-		return "No pending notifications"
+func buildTooltip(notifications []cache.CacheEntry, recentStars []cache.StarEvent) string {
+	const maxLineLen = 80 // Maximum characters per tooltip line
+	var tooltip strings.Builder
+
+	// Add notifications section
+	if len(notifications) > 0 {
+		tooltip.WriteString("GitHub Notifications:\n")
+
+		// Sort notifications by repository for better organization
+		sort.Slice(notifications, func(i, j int) bool {
+			if notifications[i].Repository != notifications[j].Repository {
+				return notifications[i].Repository < notifications[j].Repository
+			}
+			return notifications[i].UpdatedAt.After(notifications[j].UpdatedAt)
+		})
+
+		currentRepo := ""
+		for _, notif := range notifications {
+			if notif.Repository != currentRepo {
+				if currentRepo != "" {
+					tooltip.WriteString("\n")
+				}
+				tooltip.WriteString(fmt.Sprintf("%s %s:\n", nerdfonts.Repository, notif.Repository))
+				currentRepo = notif.Repository
+			}
+
+			// Format notification with Nerd Font icon
+			icon := getNotificationIcon(notif.Reason, notif.Type)
+			line := fmt.Sprintf("  %s %s (%s)", icon, notif.Title, notif.Reason)
+			tooltip.WriteString(truncateString(line, maxLineLen) + "\n")
+		}
 	}
 
-	var tooltip strings.Builder
-	tooltip.WriteString("GitHub Notifications:\n")
-
-	// Sort notifications by repository for better organization
-	sort.Slice(notifications, func(i, j int) bool {
-		if notifications[i].Repository != notifications[j].Repository {
-			return notifications[i].Repository < notifications[j].Repository
+	// Add recent stars section
+	if len(recentStars) > 0 {
+		if len(notifications) > 0 {
+			tooltip.WriteString("\n")
 		}
-		return notifications[i].UpdatedAt.After(notifications[j].UpdatedAt)
-	})
+		tooltip.WriteString(fmt.Sprintf("%s Recent Stars (last hour):\n", nerdfonts.StarredRepo))
 
-	currentRepo := ""
-	for _, notif := range notifications {
-		if notif.Repository != currentRepo {
-			if currentRepo != "" {
-				tooltip.WriteString("\n")
-			}
-			tooltip.WriteString(fmt.Sprintf("%s %s:\n", nerdfonts.Repository, notif.Repository))
-			currentRepo = notif.Repository
+		// Sort stars by time (newest first)
+		sort.Slice(recentStars, func(i, j int) bool {
+			return recentStars[i].StarredAt.After(recentStars[j].StarredAt)
+		})
+
+		for _, star := range recentStars {
+			timeAgo := time.Since(star.StarredAt).Round(time.Minute)
+			line := fmt.Sprintf("  %s %s starred %s (%v ago)",
+				nerdfonts.StarredRepo, star.StarredBy, star.Repository, timeAgo)
+			tooltip.WriteString(truncateString(line, maxLineLen) + "\n")
 		}
+	}
 
-		// Format notification with Nerd Font icon
-		icon := getNotificationIcon(notif.Reason, notif.Type)
-		tooltip.WriteString(fmt.Sprintf("  %s %s (%s)\n", icon, notif.Title, notif.Reason))
+	if len(notifications) == 0 && len(recentStars) == 0 {
+		return "No notifications or recent stars"
 	}
 
 	return tooltip.String()

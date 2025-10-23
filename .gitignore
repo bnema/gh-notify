@@ -38,3 +38,11 @@ Thumbs.db
 
 # Local cache for testing
 .cache/
+.serena/
+
+# Generated mocks
+internal/github/mocks/
+
+# Test coverage
+coverage.out
+coverage.html

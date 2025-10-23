@@ -30,7 +30,7 @@ Use --dry-run to see what would be installed without making changes.`,
 }
 
 func init() {
-	installServiceCmd.Flags().DurationVar(&interval, "interval", 10*time.Second, "sync interval (e.g., 10s, 1m, 5m)")
+	installServiceCmd.Flags().DurationVar(&interval, "interval", 60*time.Second, "sync interval (minimum 60s to respect GitHub API guidelines, e.g., 60s, 2m, 5m)")
 	installServiceCmd.Flags().BoolVar(&uninstall, "uninstall", false, "remove the service instead of installing")
 	installServiceCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be installed without doing it")
 }
@@ -49,6 +49,11 @@ func runInstallService(cmd *cobra.Command, args []string) error {
 }
 
 func runInstall(systemdMgr *service.SystemdManager) error {
+	// Validate minimum interval to respect GitHub API guidelines
+	if interval < 60*time.Second {
+		return fmt.Errorf("interval must be at least 60 seconds to respect GitHub API polling guidelines (X-Poll-Interval header)")
+	}
+
 	// Check if already installed
 	if systemdMgr.IsInstalled() && !dryRun {
 		fmt.Println("⚠️  Service is already installed")

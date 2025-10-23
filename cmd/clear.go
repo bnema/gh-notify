@@ -34,7 +34,7 @@ func runClear(cmd *cobra.Command, args []string) error {
 	}
 
 	notifications := cache.GetNotifications()
-	
+
 	if len(notifications) == 0 {
 		fmt.Println("Cache is already empty.")
 		return nil
@@ -44,13 +44,13 @@ func runClear(cmd *cobra.Command, args []string) error {
 	if !force {
 		fmt.Printf("This will clear %d cached notifications.\n", len(notifications))
 		fmt.Print("Are you sure? [y/N]: ")
-		
+
 		reader := bufio.NewReader(os.Stdin)
 		response, err := reader.ReadString('\n')
 		if err != nil {
 			return fmt.Errorf("failed to read input: %w", err)
 		}
-		
+
 		response = strings.TrimSpace(strings.ToLower(response))
 		if response != "y" && response != "yes" {
 			fmt.Println("Cancelled.")
@@ -67,7 +67,7 @@ func runClear(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("✓ Cache cleared (%d notifications removed)\n", len(notifications))
-	
+
 	if verbose {
 		fmt.Printf("Cache file updated: %s\n", cacheDir)
 	}
