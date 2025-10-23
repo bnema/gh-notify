@@ -278,6 +278,7 @@ func (c *Client) fetchStarsForRepo(repoName string, since time.Time) ([]StarEven
 		for _, edge := range response.Repository.Stargazers.Edges {
 			if edge.StarredAt.After(since) {
 				allStars = append(allStars, StarEvent{
+					ID:         fmt.Sprintf("%s-%s-%d", repoName, edge.Node.Login, edge.StarredAt.Unix()),
 					StarredBy:  edge.Node.Login,
 					Repository: repoName,
 					StarredAt:  edge.StarredAt,
